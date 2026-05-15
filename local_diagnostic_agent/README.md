@@ -54,3 +54,29 @@ POST /actions/stop-edge
 
 It accepts `{"action": "stop_edge"}` and stops Microsoft Edge processes if they
 are running. It does not execute arbitrary commands.
+
+## Build Windows EXE
+
+From this folder:
+
+```powershell
+.\build_exe.ps1
+```
+
+The executable is created at:
+
+```text
+dist\LocalDiagnosticAgent.exe
+```
+
+Run it on the user's machine:
+
+```powershell
+.\LocalDiagnosticAgent.exe
+```
+
+Optional:
+
+```powershell
+.\LocalDiagnosticAgent.exe --port 8765 --open-health
+```
