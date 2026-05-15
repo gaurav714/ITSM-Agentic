@@ -20,8 +20,8 @@ export default function HelpdeskHomePage() {
   const startApp = () => navigate("/chat");
 
   return (
-    <div className="h-full overflow-y-auto bg-[#071426] text-white">
-      <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-slate-200 px-6 py-4 text-slate-700 shadow-sm">
+    <div className="flex h-full flex-col overflow-hidden bg-[#071426] text-white">
+      <header className="z-20 shrink-0 border-b border-slate-200/80 bg-slate-200 px-6 py-3 text-slate-700 shadow-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
           <button
             type="button"
@@ -69,18 +69,18 @@ export default function HelpdeskHomePage() {
         </div>
       </header>
 
-      <section className="relative min-h-[calc(100vh-73px)] overflow-hidden">
+      <section className="relative min-h-0 flex-1 overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(96,165,250,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(96,165,250,0.05)_1px,transparent_1px)] bg-[size:76px_76px]" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_72%_50%,rgba(37,99,235,0.2),transparent_34%),linear-gradient(90deg,rgba(17,24,58,0.96),rgba(5,19,32,0.98))]" />
 
-        <div className="relative mx-auto grid min-h-[calc(100vh-73px)] max-w-7xl items-center gap-12 px-6 py-14 lg:grid-cols-[1fr_0.95fr] lg:px-8">
+        <div className="relative mx-auto grid h-full max-w-7xl items-center gap-8 px-6 py-6 lg:grid-cols-[1fr_0.95fr] lg:px-8">
           <div className="max-w-3xl">
             <div className="inline-flex items-center gap-3 rounded-full border border-blue-400/50 bg-blue-500/15 px-4 py-2 text-sm font-semibold text-slate-200 shadow-inner shadow-blue-400/10">
               <Icon name="sparkle" className="h-4 w-4 text-blue-200" />
               Zoé Axon - Autonomous IT Service Management
             </div>
 
-            <h1 className="mt-8 text-5xl font-black leading-[1.05] tracking-normal text-white sm:text-6xl lg:text-7xl">
+            <h1 className="mt-6 text-4xl font-black leading-[1.05] tracking-normal text-white sm:text-5xl lg:text-6xl">
               Meet <span className="text-blue-500">Zoé</span>.
               <br />
               The future of voice
@@ -88,13 +88,13 @@ export default function HelpdeskHomePage() {
               for IT support.
             </h1>
 
-            <p className="mt-8 max-w-2xl text-xl leading-8 text-slate-200">
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-200">
               Zoé resolves L1-L3 tickets autonomously - password resets, slow
               laptops, VPN failures, software requests - in seconds, not hours.
               Watch her work live.
             </p>
 
-            <div className="mt-10 flex flex-col gap-4 sm:flex-row">
+            <div className="mt-8 flex flex-col gap-4 sm:flex-row">
               <button
                 type="button"
                 onClick={startApp}
@@ -113,7 +113,7 @@ export default function HelpdeskHomePage() {
               </button>
             </div>
 
-            <div className="mt-14 space-y-6">
+            <div className="mt-8 space-y-4">
               {proofPoints.map(([title, detail]) => (
                 <div
                   key={title}
@@ -128,7 +128,7 @@ export default function HelpdeskHomePage() {
             </div>
           </div>
 
-          <div className="relative mx-auto flex aspect-square w-full max-w-[620px] items-center justify-center">
+          <div className="relative mx-auto hidden aspect-square w-full max-w-[min(560px,70vh)] items-center justify-center lg:flex">
             <div className="absolute inset-[4%] rounded-full border border-slate-400/15" />
             <div className="absolute inset-[13%] rounded-full border border-slate-400/15" />
             <div className="absolute inset-[23%] rounded-full border border-blue-300/10" />

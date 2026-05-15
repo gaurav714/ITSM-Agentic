@@ -2,6 +2,7 @@
 setlocal
 cd /d "%~dp0"
 set LOG=%~dp0local_mcp_startup.log
+set SERVER_LOG=%~dp0local_mcp_server.log
 echo Local MCP startup diagnostics > "%LOG%"
 echo Started: %DATE% %TIME% >> "%LOG%"
 echo Folder: %CD% >> "%LOG%"
@@ -19,7 +20,7 @@ echo Unblocking downloaded files... >> "%LOG%"
 powershell -ExecutionPolicy Bypass -NoProfile -Command "Get-ChildItem -LiteralPath '%~dp0' -Recurse -File | Unblock-File -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1
 
 echo Starting server... >> "%LOG%"
-start "LocalDiagnosticMcpServer" /b "%~dp0LocalDiagnosticMcpServer.exe" --host 127.0.0.1 --port 8765 >> "%LOG%" 2>&1
+powershell -ExecutionPolicy Bypass -NoProfile -Command "Start-Process -FilePath '%~dp0LocalDiagnosticMcpServer.exe' -WorkingDirectory '%~dp0' -ArgumentList '--host','127.0.0.1','--port','8765' -RedirectStandardOutput '%SERVER_LOG%' -RedirectStandardError '%SERVER_LOG%' -WindowStyle Hidden" >> "%LOG%" 2>&1
 timeout /t 5 /nobreak > nul
 
 echo. >> "%LOG%"

@@ -9,15 +9,16 @@ import SettingsPage from "./pages/SettingsPage.jsx";
 export default function App() {
   const location = useLocation();
   const isHome = location.pathname === "/";
+  const isChat = location.pathname.startsWith("/chat");
 
   return (
     <div className="flex h-screen flex-col">
       {!isHome && <Header />}
       <div className="flex flex-1 overflow-hidden">
-        {!isHome && <Sidebar />}
+        {!isHome && !isChat && <Sidebar />}
         <main
           className={`flex-1 overflow-hidden ${
-            isHome ? "bg-slate-950" : "bg-slate-50"
+            isHome ? "bg-slate-950" : "bg-white"
           }`}
         >
           <Routes>

@@ -32,14 +32,31 @@ export default function ChatWindow({ messages, cards, loading }) {
   ].sort((a, b) => a.ts - b.ts);
 
   return (
-    <div className="flex-1 overflow-y-auto p-4">
-      <div className="mx-auto flex max-w-3xl flex-col gap-3">
+    <div className="min-h-0 flex-1 overflow-y-auto bg-gradient-to-b from-white via-white to-slate-50/80 p-5">
+      <div className="mx-auto flex max-w-2xl flex-col gap-3">
         {stream.length === 0 && (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
-            Start by describing your IT issue. Try:{" "}
-            <span className="font-medium text-slate-700">
-              "My system is slow"
-            </span>
+          <div className="flex min-h-[420px] flex-col items-center justify-center text-center">
+            <div className="mb-5 flex h-[70px] w-[70px] items-center justify-center rounded-full bg-brand/10 text-brand">
+              <svg
+                aria-hidden="true"
+                className="h-7 w-7"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 8h.01M11 12h1v5h1" />
+              </svg>
+            </div>
+            <p className="text-base font-semibold text-slate-950">
+              Press Play to start the conversation
+            </p>
+            <p className="mt-2 max-w-xs text-sm leading-6 text-slate-600">
+              You will see a realistic interaction between a user and Zoe.
+            </p>
           </div>
         )}
         {stream.map((item, idx) => {
