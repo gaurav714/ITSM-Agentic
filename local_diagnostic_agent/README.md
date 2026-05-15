@@ -1,9 +1,9 @@
-# Local Diagnostic Assistant
+# Local Diagnostic MCP Server
 
 This is the user-system companion app for the helpdesk browser UI. It runs on
-the user's workstation, accepts browser requests over localhost, searches local
-diagnostic tools for a "system is slow" request, runs safe read-only checks, and
-returns normalized findings that the browser forwards to the backend.
+the user's workstation as a local MCP server, accepts MCP JSON-RPC requests over
+localhost, exposes allowlisted diagnostic tools, and returns normalized findings
+that the browser forwards to the backend.
 
 ## Run
 
@@ -24,36 +24,45 @@ cd local_diagnostic_agent
 The frontend defaults to:
 
 ```text
-http://127.0.0.1:8765/diagnostics/search
+http://127.0.0.1:8765/mcp
 ```
 
 Override with `VITE_LOCAL_DIAGNOSTIC_AGENT_URL` if needed.
 
-## Endpoint
+## MCP Endpoint
 
 ```text
-POST /diagnostics/search
+POST /mcp
 ```
 
-The response includes:
+Supported MCP methods:
 
-- `summary`
-- `recommendation`
-- `tools`
-- `actions`
-- `metrics`
+- `initialize`
+- `tools/list`
+- `tools/call`
+
+Current tools:
+
+- `diagnostics.search`
+- `actions.stop_edge`
+
+The `diagnostics.search` structured tool result includes `summary`,
+`recommendation`, `tools`, `actions`, and `metrics`.
 
 ## Remediation Actions
 
-The app exposes only allowlisted remediation actions. At the moment, the only
-action is:
+The app exposes only allowlisted remediation actions as MCP tools. At the
+moment, the only action tool is:
 
 ```text
-POST /actions/stop-edge
+actions.stop_edge
 ```
 
 It accepts `{"action": "stop_edge"}` and stops Microsoft Edge processes if they
 are running. It does not execute arbitrary commands.
+
+The older `/diagnostics/search` and `/actions/stop-edge` endpoints are retained
+as compatibility aliases for existing local installs.
 
 ## Build Windows EXE
 

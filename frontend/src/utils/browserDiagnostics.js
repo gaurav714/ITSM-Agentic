@@ -1,17 +1,12 @@
-const LOCAL_DIAGNOSTIC_AGENT_URL =
+const LOCAL_DIAGNOSTIC_AGENT_URL = normalizeLocalMcpUrl(
   import.meta.env.VITE_LOCAL_DIAGNOSTIC_AGENT_URL ||
-  "http://127.0.0.1:8765/diagnostics/search";
-const LOCAL_DIAGNOSTIC_AGENT_STOP_EDGE_URL =
-  import.meta.env.VITE_LOCAL_DIAGNOSTIC_AGENT_STOP_EDGE_URL ||
-  LOCAL_DIAGNOSTIC_AGENT_URL.replace(
-    /\/diagnostics\/search$/,
-    "/actions/stop-edge",
-  );
+    "http://127.0.0.1:8765/mcp",
+);
 
 /**
  * Browser-side diagnostics. The browser first gathers its own limited metrics,
- * then optionally asks a local user-system diagnostic agent for richer tool
- * search/diagnostic data. The backend receives the combined payload.
+ * then optionally calls a local MCP diagnostic server for richer tool data.
+ * The backend receives the combined payload.
  */
 export async function collectBrowserDiagnostics(context = {}) {
   const navConn = navigator.connection || {};
@@ -58,30 +53,14 @@ export async function executeLocalAgentAction(action, context = {}) {
     };
   }
 
-  const response = await fetch(LOCAL_DIAGNOSTIC_AGENT_STOP_EDGE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action,
-      context: {
-        session_id: context.sessionId,
-        device_name: context.deviceName,
-        diagnostic_id: context.diagnosticId,
-      },
-    }),
+  return callLocalMcpTool("actions.stop_edge", {
+    action,
+    context: {
+      session_id: context.sessionId,
+      device_name: context.deviceName,
+      diagnostic_id: context.diagnosticId,
+    },
   });
-
-  if (!response.ok) {
-    return {
-      action,
-      status: "failed",
-      message: `Local diagnostic assistant returned HTTP ${response.status}.`,
-      stopped_processes: [],
-      errors: [`http_${response.status}`],
-    };
-  }
-
-  return response.json();
 }
 
 async function queryLocalDiagnosticAgent(browserMetrics, context) {
@@ -89,11 +68,9 @@ async function queryLocalDiagnosticAgent(browserMetrics, context) {
   const timeout = window.setTimeout(() => controller.abort(), 2500);
 
   try {
-    const response = await fetch(LOCAL_DIAGNOSTIC_AGENT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
+    const response = await callLocalMcpTool(
+      "diagnostics.search",
+      {
         query: "system is slow",
         context: {
           session_id: context.sessionId,
@@ -101,18 +78,46 @@ async function queryLocalDiagnosticAgent(browserMetrics, context) {
           diagnostic_id: context.diagnosticId,
           browser_metrics: browserMetrics,
         },
-      }),
-    });
+      },
+      controller.signal,
+    );
 
-    if (!response.ok) {
-      return { response: null, error: `local_agent_http_${response.status}` };
-    }
-
-    return { response: await response.json(), error: null };
+    return { response, error: null };
   } catch (error) {
     const name = error?.name === "AbortError" ? "timeout" : "unreachable";
     return { response: null, error: `local_agent_${name}` };
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+async function callLocalMcpTool(name, args, signal) {
+  const response = await fetch(LOCAL_DIAGNOSTIC_AGENT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      method: "tools/call",
+      params: { name, arguments: args },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`local_mcp_http_${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (payload.error) {
+    throw new Error(payload.error.message || "local_mcp_error");
+  }
+
+  return payload.result?.structuredContent || {};
+}
+
+function normalizeLocalMcpUrl(url) {
+  return String(url)
+    .replace(/\/diagnostics\/search$/, "/mcp")
+    .replace(/\/actions\/stop-edge$/, "/mcp");
 }

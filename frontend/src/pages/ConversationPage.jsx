@@ -143,7 +143,7 @@ async function maybeAutoExecuteLocalAgentAction(
     await submitLocalActionResult(sessionId, {
       action: actionRequest.action,
       status: "failed",
-      message: "Unable to contact the local diagnostic assistant.",
+      message: "Unable to contact the local MCP diagnostic server.",
       stopped_processes: [],
       errors: [error?.message || "local_agent_unreachable"],
     });

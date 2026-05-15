@@ -1,4 +1,4 @@
-"""Request/response schemas for the local diagnostic assistant."""
+"""Request/response schemas for the local diagnostic MCP server."""
 
 from __future__ import annotations
 

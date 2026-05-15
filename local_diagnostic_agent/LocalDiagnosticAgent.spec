@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_submodules
 
-hiddenimports = ['app.main', 'app.agent', 'app.tools', 'app.schemas']
+hiddenimports = ['app.main', 'app.agent', 'app.tools', 'app.schemas', 'app.mcp']
 hiddenimports += collect_submodules('uvicorn')
 hiddenimports += collect_submodules('fastapi')
 hiddenimports += collect_submodules('starlette')

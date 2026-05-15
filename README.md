@@ -1,6 +1,6 @@
 # AI Helpdesk Assistant Platform
 
-Generic AI-powered IT helpdesk assistant with a modular workflow registry. Iteration 1 implements the **System Slow Diagnostics** workflow end-to-end with mock Intune / SCCM / local-agent adapters and a real browser-diagnostics fallback. Other workflows (Password Reset, VPN Access, …) are registered as "Coming soon" placeholders so the architecture is ready for them.
+Generic AI-powered IT helpdesk assistant with a modular workflow registry. Iteration 1 implements the **System Slow Diagnostics** workflow end-to-end with mock Intune / SCCM / local-agent adapters and a real browser-diagnostics fallback that can enrich results through a local MCP diagnostic server. Other workflows (Password Reset, VPN Access, …) are registered as "Coming soon" placeholders so the architecture is ready for them.
 
 ## Project layout
 
@@ -43,14 +43,14 @@ App: <http://localhost:5173>
    - `LAPTOP-INTUNE-01` → Intune adapter path (high CPU/memory)
    - `DESKTOP-SCCM-42` → SCCM adapter path
    - `WS-AGENT-7` → local-agent adapter path
-   - any other name → browser fallback (frontend submits real browser metrics)
+   - any other name → browser fallback (frontend submits real browser metrics and, when available, local MCP diagnostic tool results)
 3. Review the diagnostic and ticket-draft cards; reply `yes` to create the mock ticket.
 4. Visit **Tickets** to see the created mock tickets.
 
 ## Architecture notes
 
 - **Workflow registry** (`app/services/workflow_registry.py`) — every workflow implements `BaseWorkflow.handle(session, message)`. Adding a new workflow = new module + one registry entry.
-- **Diagnostic router** (`app/services/diagnostic_router.py`) — fixed priority: Intune → SCCM → Custom Agent → Browser fallback. Adapters share a uniform `device_exists` / `collect` shape.
+- **Diagnostic router** (`app/services/diagnostic_router.py`) — fixed priority: Intune → SCCM → Custom Agent → Browser fallback. Browser fallback can call the local MCP diagnostic server over localhost. Adapters share a uniform `device_exists` / `collect` shape.
 - **Cards** — backend returns generic `UICard{kind,data}` items; the frontend has a card-renderer registry, so new workflows can ship new card kinds without changing `ChatWindow`.
 - **Security** — the LLM never executes commands. It only classifies intent and (optionally) summarizes results. Tickets are only created after explicit user confirmation. Adapters are an allowlist.
 

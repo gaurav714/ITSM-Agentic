@@ -42,7 +42,7 @@ def run_tool(name: str, context: DiagnosticContext) -> ToolResult:
     return ToolResult(
         name=name,
         status="skipped",
-        description="Tool is not allowlisted by this local diagnostic assistant.",
+        description="Tool is not allowlisted by this local diagnostic MCP server.",
         result={},
     )
 

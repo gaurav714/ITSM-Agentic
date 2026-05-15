@@ -15,6 +15,7 @@ try {
         --hidden-import app.agent `
         --hidden-import app.tools `
         --hidden-import app.schemas `
+        --hidden-import app.mcp `
         --collect-submodules uvicorn `
         --collect-submodules fastapi `
         --collect-submodules starlette `

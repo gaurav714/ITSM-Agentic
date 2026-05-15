@@ -1,4 +1,4 @@
-"""FastAPI entry point for the local diagnostic assistant."""
+"""FastAPI entry point for the local diagnostic MCP server."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent import diagnose
+from app.mcp import McpRequest, handle_mcp_request
 from app.schemas import (
     ActionExecutionRequest,
     ActionExecutionResponse,
@@ -14,7 +15,7 @@ from app.schemas import (
 )
 from app.tools import stop_edge_processes
 
-app = FastAPI(title="Local Diagnostic Assistant", version="0.1.0")
+app = FastAPI(title="Local Diagnostic MCP Server", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,13 +43,20 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.post("/mcp")
+def mcp(req: McpRequest) -> dict:
+    return handle_mcp_request(req)
+
+
 @app.post("/diagnostics/search", response_model=DiagnosticSearchResponse)
 def diagnostics_search(req: DiagnosticSearchRequest) -> DiagnosticSearchResponse:
+    """Compatibility endpoint. New clients should call MCP tools/call."""
     return diagnose(req)
 
 
 @app.post("/actions/stop-edge", response_model=ActionExecutionResponse)
 def stop_edge(req: ActionExecutionRequest) -> ActionExecutionResponse:
+    """Compatibility endpoint. New clients should call MCP tools/call."""
     if req.action != "stop_edge":
         return ActionExecutionResponse(
             action=req.action,
