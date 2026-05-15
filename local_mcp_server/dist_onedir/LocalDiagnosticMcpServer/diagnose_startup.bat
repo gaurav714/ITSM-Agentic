@@ -2,7 +2,8 @@
 setlocal
 cd /d "%~dp0"
 set LOG=%~dp0local_mcp_startup.log
-set SERVER_LOG=%~dp0local_mcp_server.log
+set SERVER_OUT=%~dp0local_mcp_server.out.log
+set SERVER_ERR=%~dp0local_mcp_server.err.log
 echo Local MCP startup diagnostics > "%LOG%"
 echo Started: %DATE% %TIME% >> "%LOG%"
 echo Folder: %CD% >> "%LOG%"
@@ -20,12 +21,16 @@ echo Unblocking downloaded files... >> "%LOG%"
 powershell -ExecutionPolicy Bypass -NoProfile -Command "Get-ChildItem -LiteralPath '%~dp0' -Recurse -File | Unblock-File -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1
 
 echo Starting server... >> "%LOG%"
-powershell -ExecutionPolicy Bypass -NoProfile -Command "Start-Process -FilePath '%~dp0LocalDiagnosticMcpServer.exe' -WorkingDirectory '%~dp0' -ArgumentList '--host','127.0.0.1','--port','8765' -RedirectStandardOutput '%SERVER_LOG%' -RedirectStandardError '%SERVER_LOG%' -WindowStyle Hidden" >> "%LOG%" 2>&1
+powershell -ExecutionPolicy Bypass -NoProfile -Command "Start-Process -FilePath '%~dp0LocalDiagnosticMcpServer.exe' -WorkingDirectory '%~dp0' -ArgumentList '--host','127.0.0.1','--port','8765' -RedirectStandardOutput '%SERVER_OUT%' -RedirectStandardError '%SERVER_ERR%' -WindowStyle Hidden" >> "%LOG%" 2>&1
 timeout /t 5 /nobreak > nul
 
 echo. >> "%LOG%"
 echo Testing MCP endpoint... >> "%LOG%"
 powershell -ExecutionPolicy Bypass -NoProfile -Command "try { Invoke-RestMethod -Method Post http://127.0.0.1:8765/mcp -ContentType 'application/json' -Body '{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/list\",\"params\":{}}' | ConvertTo-Json -Depth 8 } catch { $_ | Out-String }" >> "%LOG%" 2>&1
+
+echo. >> "%LOG%"
+echo Server stdout log: %SERVER_OUT% >> "%LOG%"
+echo Server stderr log: %SERVER_ERR% >> "%LOG%"
 
 echo. >> "%LOG%"
 echo Diagnostics written to:
