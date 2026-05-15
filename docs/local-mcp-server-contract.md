@@ -16,7 +16,7 @@ POST http://127.0.0.1:8765/mcp
 Override with:
 
 ```text
-VITE_LOCAL_DIAGNOSTIC_AGENT_URL=http://127.0.0.1:8765/mcp
+VITE_LOCAL_MCP_SERVER_URL=http://127.0.0.1:8765/mcp
 ```
 
 The local app must allow CORS from the frontend origin, for example
@@ -73,7 +73,7 @@ Current tools:
 ## Response
 
 The browser stores `result.structuredContent` as
-`metrics.local_agent_response`. These top-level structured fields are also
+`metrics.local_mcp_response`. These top-level structured fields are also
 normalized when present:
 
 ```json
@@ -119,7 +119,7 @@ normalized when present:
 
 The browser treats the local MCP server as optional. If it is not running or
 times out, the frontend still submits browser-only diagnostics with
-`local_agent_available: false`.
+`local_mcp_available: false`.
 
 ## Remediation Actions
 

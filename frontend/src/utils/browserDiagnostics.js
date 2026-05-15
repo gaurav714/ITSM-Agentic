@@ -1,7 +1,5 @@
-const LOCAL_DIAGNOSTIC_AGENT_URL = normalizeLocalMcpUrl(
-  import.meta.env.VITE_LOCAL_DIAGNOSTIC_AGENT_URL ||
-    "http://127.0.0.1:8765/mcp",
-);
+const LOCAL_MCP_SERVER_URL =
+  import.meta.env.VITE_LOCAL_MCP_SERVER_URL || "http://127.0.0.1:8765/mcp";
 
 /**
  * Browser-side diagnostics. The browser first gathers its own limited metrics,
@@ -32,22 +30,22 @@ export async function collectBrowserDiagnostics(context = {}) {
     },
   };
 
-  const localAgent = await queryLocalDiagnosticAgent(browserMetrics, context);
+  const localMcp = await queryLocalMcpServer(browserMetrics, context);
 
   return {
     ...browserMetrics,
-    local_agent_available: Boolean(localAgent.response),
-    local_agent_response: localAgent.response,
-    local_agent_error: localAgent.error,
+    local_mcp_available: Boolean(localMcp.response),
+    local_mcp_response: localMcp.response,
+    local_mcp_error: localMcp.error,
   };
 }
 
-export async function executeLocalAgentAction(action, context = {}) {
+export async function executeLocalMcpAction(action, context = {}) {
   if (action !== "stop_edge") {
     return {
       action,
       status: "rejected",
-      message: "This local action is not supported by the browser client.",
+      message: "This local MCP action is not supported by the browser client.",
       stopped_processes: [],
       errors: [],
     };
@@ -63,7 +61,7 @@ export async function executeLocalAgentAction(action, context = {}) {
   });
 }
 
-async function queryLocalDiagnosticAgent(browserMetrics, context) {
+async function queryLocalMcpServer(browserMetrics, context) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 2500);
 
@@ -85,14 +83,14 @@ async function queryLocalDiagnosticAgent(browserMetrics, context) {
     return { response, error: null };
   } catch (error) {
     const name = error?.name === "AbortError" ? "timeout" : "unreachable";
-    return { response: null, error: `local_agent_${name}` };
+    return { response: null, error: `local_mcp_${name}` };
   } finally {
     window.clearTimeout(timeout);
   }
 }
 
 async function callLocalMcpTool(name, args, signal) {
-  const response = await fetch(LOCAL_DIAGNOSTIC_AGENT_URL, {
+  const response = await fetch(LOCAL_MCP_SERVER_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal,
@@ -114,10 +112,4 @@ async function callLocalMcpTool(name, args, signal) {
   }
 
   return payload.result?.structuredContent || {};
-}
-
-function normalizeLocalMcpUrl(url) {
-  return String(url)
-    .replace(/\/diagnostics\/search$/, "/mcp")
-    .replace(/\/actions\/stop-edge$/, "/mcp");
 }

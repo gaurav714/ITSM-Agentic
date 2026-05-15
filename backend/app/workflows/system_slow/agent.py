@@ -43,7 +43,7 @@ def run_system_slow_agent(
             "You are an enterprise endpoint diagnostics agent. You may only use "
             "the provided tools. Select the best diagnostic method, run "
             "diagnostics for the device, and prepare a support ticket draft. If "
-            "browser-submitted local agent data is present in diagnostics, use it "
+            "browser-submitted local MCP data is present in diagnostics, use it "
             "as telemetry only. Never invent device metrics or ticket details. "
             "Return a concise summary of the performed tool calls."
         ),
@@ -288,9 +288,9 @@ def _device_name_from_diagnostic(
         if isinstance(value, str) and value.strip():
             return value.strip()
 
-    local_agent_response = diagnostic.get("local_agent_response")
-    if isinstance(local_agent_response, dict):
-        local_metrics = local_agent_response.get("metrics")
+    local_mcp_response = diagnostic.get("local_mcp_response")
+    if isinstance(local_mcp_response, dict):
+        local_metrics = local_mcp_response.get("metrics")
         if isinstance(local_metrics, dict):
             hostname = local_metrics.get("hostname")
             if isinstance(hostname, str) and hostname.strip():
@@ -310,8 +310,8 @@ def _summarize(diagnostic: Dict[str, Any], device_name: str) -> str:
         "device_memory_gb",
         "online",
         "page_load_ms",
-        "local_agent_available",
-        "local_agent_summary",
+        "local_mcp_available",
+        "local_mcp_summary",
         "diagnostic_recommendation",
         "tool_candidates",
         "remediation_actions",
@@ -348,16 +348,16 @@ def _summarize(diagnostic: Dict[str, Any], device_name: str) -> str:
         bits.append(f"{disk} GB disk free.")
     if procs:
         bits.append(f"Top processes: {', '.join(procs[:3])}.")
-    if diagnostic.get("local_agent_summary"):
-        bits.append(f"Local diagnostic assistant: {diagnostic['local_agent_summary']}")
+    if diagnostic.get("local_mcp_summary"):
+        bits.append(f"Local MCP server: {diagnostic['local_mcp_summary']}")
     if diagnostic.get("diagnostic_recommendation"):
         bits.append(f"Recommendation: {diagnostic['diagnostic_recommendation']}")
     if method == "browser_only":
-        if diagnostic.get("local_agent_available"):
-            bits.append("Browser metrics were enriched by the local diagnostic assistant.")
+        if diagnostic.get("local_mcp_available"):
+            bits.append("Browser metrics were enriched by the local MCP server.")
         else:
             bits.append(
-                "Only browser-level metrics were available; install or start the local diagnostic assistant for deeper diagnostics."
+                "Only browser-level metrics were available; install or start the local MCP server for deeper diagnostics."
             )
     elif cpu and cpu >= 85:
         bits.append("CPU pressure is the likely cause; consider closing high-CPU processes.")

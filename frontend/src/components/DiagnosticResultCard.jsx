@@ -35,10 +35,10 @@ export default function DiagnosticResultCard({ data }) {
           </ul>
         </div>
       )}
-      {m.local_agent_available && (
+      {m.local_mcp_available && (
         <div className="mt-3 rounded bg-emerald-50 p-2 text-xs text-emerald-900">
-          <p className="font-medium">Local diagnostic assistant responded</p>
-          {m.local_agent_summary && <p className="mt-1">{m.local_agent_summary}</p>}
+          <p className="font-medium">Local MCP server responded</p>
+          {m.local_mcp_summary && <p className="mt-1">{m.local_mcp_summary}</p>}
           {m.diagnostic_recommendation && (
             <p className="mt-1">Recommendation: {m.diagnostic_recommendation}</p>
           )}
@@ -53,9 +53,9 @@ export default function DiagnosticResultCard({ data }) {
           )}
         </div>
       )}
-      {!m.local_agent_available && m.local_agent_error && (
+      {!m.local_mcp_available && m.local_mcp_error && (
         <p className="mt-3 rounded bg-slate-50 p-2 text-xs text-slate-500">
-          Local diagnostic assistant: {m.local_agent_error}
+          Local MCP server: {m.local_mcp_error}
         </p>
       )}
       {data.summary && (

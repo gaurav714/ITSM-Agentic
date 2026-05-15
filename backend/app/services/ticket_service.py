@@ -39,7 +39,7 @@ def generate_ticket_draft(session: Dict[str, Any]) -> TicketDraft:
     mem = diagnostic.get("memory_pct")
     disk = diagnostic.get("disk_free_gb")
     procs = diagnostic.get("top_processes") or []
-    local_summary = diagnostic.get("local_agent_summary")
+    local_summary = diagnostic.get("local_mcp_summary")
     recommendation = diagnostic.get("diagnostic_recommendation")
 
     lines = [
@@ -55,13 +55,13 @@ def generate_ticket_draft(session: Dict[str, Any]) -> TicketDraft:
     if procs:
         lines.append(f"Top processes: {', '.join(procs)}.")
     if local_summary:
-        lines.append(f"Local diagnostic assistant summary: {local_summary}.")
+        lines.append(f"Local MCP server summary: {local_summary}.")
     if recommendation:
         lines.append(f"Recommended next step: {recommendation}.")
     if method == "browser_only":
         lines.append(
             "Limited enterprise diagnostics — device not enrolled in Intune/SCCM/enterprise endpoint agent. "
-            "Recommend using the local diagnostic assistant output or collecting deeper endpoint logs."
+            "Recommend using the local MCP server output or collecting deeper endpoint logs."
         )
 
     priority = "High" if (cpu and cpu >= 85) or (mem and mem >= 85) else "Medium"
@@ -87,8 +87,8 @@ def _llm_draft(device: str, method: str, diagnostic: Dict[str, Any]):
         "device_memory_gb",
         "online",
         "page_load_ms",
-        "local_agent_available",
-        "local_agent_summary",
+        "local_mcp_available",
+        "local_mcp_summary",
         "diagnostic_recommendation",
         "tool_candidates",
     )

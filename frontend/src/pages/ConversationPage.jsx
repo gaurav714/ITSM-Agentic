@@ -10,7 +10,7 @@ import {
 } from "../api/diagnosticApi.js";
 import {
   collectBrowserDiagnostics,
-  executeLocalAgentAction,
+  executeLocalMcpAction,
 } from "../utils/browserDiagnostics.js";
 
 export default function ConversationPage() {
@@ -43,7 +43,7 @@ export default function ConversationPage() {
           sessionId,
           addAssistantResponse,
         );
-        await maybeAutoExecuteLocalAgentAction(
+        await maybeAutoExecuteLocalMcpAction(
           resp,
           sessionId,
           addAssistantResponse,
@@ -66,7 +66,7 @@ export default function ConversationPage() {
         sessionId,
         addAssistantResponse,
       );
-      await maybeAutoExecuteLocalAgentAction(
+      await maybeAutoExecuteLocalMcpAction(
         resp,
         sessionId,
         addAssistantResponse,
@@ -122,22 +122,22 @@ async function maybeAutoSubmitBrowserDiagnostics(
   }
 }
 
-async function maybeAutoExecuteLocalAgentAction(
+async function maybeAutoExecuteLocalMcpAction(
   resp,
   sessionId,
   addAssistantResponse,
 ) {
-  const actionRequest = resp?.metadata?.trigger_local_agent_action;
+  const actionRequest = resp?.metadata?.trigger_local_mcp_action;
   if (!actionRequest?.action) return;
 
   try {
-    const result = await executeLocalAgentAction(actionRequest.action, {
+    const result = await executeLocalMcpAction(actionRequest.action, {
       sessionId,
       deviceName: actionRequest.device_name,
       diagnosticId: actionRequest.diagnostic_id,
     });
     await submitLocalActionResult(sessionId, result);
-    const next = await sendAgentMessage(sessionId, "local action complete");
+    const next = await sendAgentMessage(sessionId, "local MCP action complete");
     addAssistantResponse(next);
   } catch (error) {
     await submitLocalActionResult(sessionId, {
@@ -145,9 +145,9 @@ async function maybeAutoExecuteLocalAgentAction(
       status: "failed",
       message: "Unable to contact the local MCP diagnostic server.",
       stopped_processes: [],
-      errors: [error?.message || "local_agent_unreachable"],
+      errors: [error?.message || "local_mcp_unreachable"],
     });
-    const next = await sendAgentMessage(sessionId, "local action failed");
+    const next = await sendAgentMessage(sessionId, "local MCP action failed");
     addAssistantResponse(next);
   }
 }

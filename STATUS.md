@@ -23,16 +23,15 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | `BaseWorkflow` abstract contract                                    | ✅     | [base.py](backend/app/workflows/base.py)                                              |
 | New Employee Onboarding workflow                                    | ✅     | LangGraph tool-using agent, duplicate check, mock identity DB, RBAC groups, MFA, welcome email |
 | In-memory session store                                             | ✅     | [session_store.py](backend/app/memory/session_store.py) — replace with Redis/DB later |
-| Diagnostic router (priority: Intune → SCCM → Local Agent → Browser) | ✅     | [diagnostic_router.py](backend/app/services/diagnostic_router.py)                     |
+| Diagnostic router (priority: Intune → SCCM → Browser + local MCP)   | ✅     | [diagnostic_router.py](backend/app/services/diagnostic_router.py)                     |
 | Mock Intune adapter                                                 | ✅     | `LAPTOP-INTUNE-01`                                                                    |
 | Mock SCCM adapter                                                   | ✅     | `DESKTOP-SCCM-42`                                                                     |
-| Mock local-agent adapter                                            | ✅     | `WS-AGENT-7`                                                                          |
 | Browser diagnostics adapter                                         | ✅     | Real metrics pushed from frontend                                                     |
 | Mock ticketing adapter                                              | ✅     | Returns `INC########` ids                                                             |
 | Conversation agent / message router                                 | ✅     | [conversation_agent.py](backend/app/agents/conversation_agent.py)                     |
 | Browser → local diagnostic MCP server → backend handoff             | ✅     | Browser can call a user-system MCP tool server and submit its structured response with diagnostics |
-| Local diagnostic MCP server scaffold                                | ✅     | [local_diagnostic_agent](local_diagnostic_agent) exposes localhost `/mcp` with `tools/list` and `tools/call` |
-| Local remediation action handoff                                    | ✅     | User can approve the local assistant to stop Microsoft Edge before ticket creation     |
+| Local diagnostic MCP server scaffold                                | ✅     | [local_mcp_server](local_mcp_server) exposes localhost `/mcp` with `tools/list` and `tools/call` |
+| Local remediation action handoff                                    | ✅     | User can approve the local MCP server to stop Microsoft Edge before ticket creation    |
 
 ### Backend — **Agentic** capabilities (LLM-active when `OPENAI_API_KEY` is set)
 
@@ -45,7 +44,7 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | LLM-generated ticket draft (title, description, priority) | ✅     | [ticket_service.py](backend/app/services/ticket_service.py)                              |
 | Shared LLM client + structured-output helper              | ✅     | [llm.py](backend/app/services/llm.py)                                                    |
 | Deterministic fallback for every LLM call                 | ✅     | Works without API key                                                                    |
-| Local diagnostic assistant telemetry ingestion            | ✅     | Browser-submitted local agent output is normalized, summarized, and used before ticketing |
+| Local MCP telemetry ingestion                             | ✅     | Browser-submitted local MCP output is normalized, summarized, and used before ticketing |
 
 ### Backend — REST endpoints (all working)
 
@@ -130,7 +129,7 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | --------- | -------------------------------------------------------------------------- |
 | 2         | **Real Intune** via Microsoft Graph (`DeviceManagement.Read.All`, etc.).   |
 | 3         | **Real SCCM/MECM** via WMI / SCCM SDK / approved scripts.                  |
-| 4         | **Real local endpoint agent** — agent installer + auth + polling protocol. |
+| 4         | **Hardened local MCP server deployment** — installer/service + auth + signed distribution. |
 | 5         | **Real ServiceNow / Jira** ticketing — replace `mock_ticket_adapter`.      |
 
 ### Platform hardening (non-LLM)

@@ -9,8 +9,9 @@ try {
     & $Python -m pip install pyinstaller==6.11.1
     & $Python -m PyInstaller `
         --clean `
-        --onefile `
-        --name LocalDiagnosticAgent `
+        --noconfirm `
+        --onedir `
+        --name LocalDiagnosticMcpServer `
         --hidden-import app.main `
         --hidden-import app.agent `
         --hidden-import app.tools `
@@ -19,11 +20,12 @@ try {
         --collect-submodules uvicorn `
         --collect-submodules fastapi `
         --collect-submodules starlette `
-        run_agent.py
+        --distpath dist_onedir `
+        run_server.py
 
     Write-Host ''
-    Write-Host 'Built executable:'
-    Write-Host (Join-Path $Root 'dist\LocalDiagnosticAgent.exe')
+    Write-Host 'Built MCP server executable bundle:'
+    Write-Host (Join-Path $Root 'dist_onedir\LocalDiagnosticMcpServer\LocalDiagnosticMcpServer.exe')
 }
 finally {
     Pop-Location

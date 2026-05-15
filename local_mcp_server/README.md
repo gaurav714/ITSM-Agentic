@@ -7,17 +7,17 @@ that the browser forwards to the backend.
 
 ## Run
 
-Install local assistant dependencies:
+Install local MCP server dependencies:
 
 ```powershell
 ..\backend\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-`psutil` enables live CPU, memory, and process metrics. Without it, the agent
+`psutil` enables live CPU, memory, and process metrics. Without it, the MCP server
 still returns browser metrics, disk space, and system profile information.
 
 ```powershell
-cd local_diagnostic_agent
+cd local_mcp_server
 ..\backend\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 ```
 
@@ -27,7 +27,7 @@ The frontend defaults to:
 http://127.0.0.1:8765/mcp
 ```
 
-Override with `VITE_LOCAL_DIAGNOSTIC_AGENT_URL` if needed.
+Override with `VITE_LOCAL_MCP_SERVER_URL` if needed.
 
 ## MCP Endpoint
 
@@ -61,31 +61,28 @@ actions.stop_edge
 It accepts `{"action": "stop_edge"}` and stops Microsoft Edge processes if they
 are running. It does not execute arbitrary commands.
 
-The older `/diagnostics/search` and `/actions/stop-edge` endpoints are retained
-as compatibility aliases for existing local installs.
-
 ## Build Windows EXE
 
 From this folder:
 
 ```powershell
-.\build_exe.ps1
+.\build_mcp_server.ps1
 ```
 
-The executable is created at:
+The executable bundle is created at:
 
 ```text
-dist\LocalDiagnosticAgent.exe
+dist_onedir\LocalDiagnosticMcpServer\LocalDiagnosticMcpServer.exe
 ```
 
 Run it on the user's machine:
 
 ```powershell
-.\LocalDiagnosticAgent.exe
+.\LocalDiagnosticMcpServer.exe
 ```
 
 Optional:
 
 ```powershell
-.\LocalDiagnosticAgent.exe --port 8765 --open-health
+.\LocalDiagnosticMcpServer.exe --port 8765 --open-health
 ```
