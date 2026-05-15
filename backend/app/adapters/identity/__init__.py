@@ -1,0 +1,1 @@
+"""Mock identity adapter package."""

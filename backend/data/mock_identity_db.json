@@ -1,0 +1,42 @@
+{
+  "gauravnautiyal77@gmail.com": {
+    "department": "null",
+    "directory": "Mock AD JSON DB",
+    "email": "gauravnautiyal77@gmail.com",
+    "full_name": "Baseline",
+    "groups": [
+      "EMPLOYEE-BASELINE",
+      "M365-STANDARD",
+      "MFA-REQUIRED",
+      "APP-DEV-USERS",
+      "GIT-ACCESS",
+      "VPN-ENGINEERING"
+    ],
+    "manager": null,
+    "mfa_status": "enrolled",
+    "role": "Developer",
+    "status": "created",
+    "username": "gauravnautiyal77",
+    "welcome_email_sent": true
+  },
+  "priya.shah@example.com": {
+    "department": "Engineering",
+    "directory": "Mock AD JSON DB",
+    "email": "priya.shah@example.com",
+    "full_name": "Priya Shah",
+    "groups": [
+      "EMPLOYEE-BASELINE",
+      "M365-STANDARD",
+      "MFA-REQUIRED",
+      "APP-DEV-USERS",
+      "GIT-ACCESS",
+      "VPN-ENGINEERING"
+    ],
+    "manager": null,
+    "mfa_status": "enrolled",
+    "role": "Developer",
+    "status": "created",
+    "username": "priya.shah",
+    "welcome_email_sent": true
+  }
+}
