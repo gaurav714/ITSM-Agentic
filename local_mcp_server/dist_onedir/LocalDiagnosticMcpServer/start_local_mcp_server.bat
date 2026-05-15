@@ -1,4 +1,11 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-LocalDiagnosticMcpServer.exe --host 127.0.0.1 --port 8765
+if not exist "_internal\_socket.pyd" (
+  echo Missing _internal\_socket.pyd.
+  echo Extract the full LocalDiagnosticMcpServer folder from the zip before running.
+  echo Do not run only the exe, and do not run it from inside the zip preview.
+  pause
+  exit /b 1
+)
+powershell -ExecutionPolicy Bypass -NoProfile -File "%~dp0start_local_mcp_server.ps1"
