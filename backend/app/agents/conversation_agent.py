@@ -46,10 +46,13 @@ def handle_user_message(
         "idle",
         "complete",
     ):
-        requested_workflow = classify_intent(message)
-        if requested_workflow not in ("unknown", current_workflow):
-            _reset_workflow_context(session)
-            workflow_id = requested_workflow
+        if _is_sticky_workflow_turn(current_workflow, current_state):
+            workflow_id = current_workflow
+        else:
+            requested_workflow = classify_intent(message)
+            if requested_workflow not in ("unknown", current_workflow):
+                _reset_workflow_context(session)
+                workflow_id = requested_workflow
 
     # If there's no active workflow, classify intent.
     elif not workflow_id or session.get("state") in (None, "idle", "complete"):
@@ -82,6 +85,15 @@ def _looks_like_onboarding_followup(message: str) -> bool:
             text,
         )
     )
+
+
+def _is_sticky_workflow_turn(workflow_id: str, state: str | None) -> bool:
+    """Keep short in-workflow replies away from global intent routing."""
+    return workflow_id == "windows_update_failure" and state in {
+        "awaiting_fix_result",
+        "awaiting_access_approval",
+        "awaiting_settings_action",
+    }
 
 
 def _reset_workflow_context(session: Dict[str, Any]) -> None:

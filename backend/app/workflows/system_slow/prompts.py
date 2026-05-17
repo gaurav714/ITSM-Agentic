@@ -44,6 +44,7 @@ Metrics:
 INTENT_CLASSIFY_PROMPT = """Classify the user's IT helpdesk request into one of these workflow ids:
 - system_slow_diagnostics
 - new_employee_onboarding
+- windows_update_failure
 - password_reset
 - vpn_access
 - software_install

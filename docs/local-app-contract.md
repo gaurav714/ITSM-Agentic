@@ -1,6 +1,6 @@
-# Local Diagnostic MCP Server Contract
+# Local Diagnostic App Contract
 
-The local diagnostic MCP server is a separate app running on the user's machine.
+The local diagnostic app is a separate app running on the user's machine.
 The helpdesk browser UI calls it over localhost when the backend requests
 browser diagnostics, then forwards the structured tool response to
 `/diagnostics/browser`.
@@ -10,13 +10,13 @@ browser diagnostics, then forwards the structured tool response to
 Default URL used by the frontend:
 
 ```text
-POST http://127.0.0.1:8765/mcp
+POST http://127.0.0.1:8765/local-app
 ```
 
 Override with:
 
 ```text
-VITE_LOCAL_MCP_SERVER_URL=http://127.0.0.1:8765/mcp
+VITE_LOCAL_APP_URL=http://127.0.0.1:8765/local-app
 ```
 
 The local app must allow CORS from the frontend origin, for example
@@ -24,7 +24,7 @@ The local app must allow CORS from the frontend origin, for example
 
 ## Tool Discovery
 
-The server supports MCP-style JSON-RPC methods:
+The server supports local app JSON-RPC methods:
 
 ```json
 {
@@ -73,7 +73,7 @@ Current tools:
 ## Response
 
 The browser stores `result.structuredContent` as
-`metrics.local_mcp_response`. These top-level structured fields are also
+`metrics.local_app_response`. These top-level structured fields are also
 normalized when present:
 
 ```json
@@ -117,13 +117,13 @@ normalized when present:
 }
 ```
 
-The browser treats the local MCP server as optional. If it is not running or
+The browser treats the local app server as optional. If it is not running or
 times out, the frontend still submits browser-only diagnostics with
-`local_mcp_available: false`.
+`local_app_available: false`.
 
 ## Remediation Actions
 
-The local MCP server exposes only allowlisted action tools. The browser calls an
+The local app server exposes only allowlisted action tools. The browser calls an
 action tool only after the backend asks for it and the user confirms.
 
 Current action:

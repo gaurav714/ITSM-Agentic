@@ -95,7 +95,7 @@ class SystemSlowWorkflow(BaseWorkflow):
         # Entry — first time hitting this workflow.
         if state in ("idle", None) or session.get("workflow") != self.workflow_id:
             session["workflow"] = self.workflow_id
-            return self._start_local_mcp_diagnostics(session)
+            return self._start_local_app_diagnostics(session)
 
         if state == "awaiting_browser_diagnostics":
             # User is signalling that browser diagnostics have been pushed.
@@ -129,7 +129,7 @@ class SystemSlowWorkflow(BaseWorkflow):
         )
 
     # -- Helpers -------------------------------------------------------------
-    def _start_local_mcp_diagnostics(
+    def _start_local_app_diagnostics(
         self, session: Dict[str, Any]
     ) -> AgentMessageResponse:
         device_name = session.get("device_name") or _LOCAL_DEVICE_PLACEHOLDER
@@ -140,7 +140,7 @@ class SystemSlowWorkflow(BaseWorkflow):
         return AgentMessageResponse(
             message=(
                 "I can help diagnose system slowness. I'll ask the browser to query "
-                "the local MCP server running on this system and collect diagnostics — one moment."
+                "the local app server running on this system and collect diagnostics — one moment."
             ),
             workflow=self.workflow_id,
             state="awaiting_browser_diagnostics",
@@ -149,8 +149,8 @@ class SystemSlowWorkflow(BaseWorkflow):
                     kind="diagnostic_status",
                     data={
                         "diagnostic_id": session["diagnostic_id"],
-                        "method": "local_mcp_server",
-                        "status": "collecting_local_mcp_metrics",
+                        "method": "local_app",
+                        "status": "collecting_local_app_metrics",
                         "device_name": device_name,
                     },
                 )
@@ -183,7 +183,7 @@ class SystemSlowWorkflow(BaseWorkflow):
             return AgentMessageResponse(
                 message=(
                     f"{summary}\n\nMicrosoft Edge appears to be running. "
-                    "Reply 'yes' to close Edge using the local MCP server, "
+                    "Reply 'yes' to close Edge using the local app server, "
                     "or 'no' to skip this step."
                 ),
                 workflow=self.workflow_id,
@@ -241,11 +241,11 @@ class SystemSlowWorkflow(BaseWorkflow):
             session["state"] = "awaiting_remediation_action"
             session.pop("local_action_result", None)
             return AgentMessageResponse(
-                message="I'll ask the local MCP server to close Microsoft Edge now.",
+                message="I'll ask the local app server to close Microsoft Edge now.",
                 workflow=self.workflow_id,
                 state="awaiting_remediation_action",
                 metadata={
-                    "trigger_local_mcp_action": {
+                    "trigger_local_app_action": {
                         "action": "stop_edge",
                         "diagnostic_id": session.get("diagnostic_id"),
                         "device_name": session.get("device_name"),
@@ -276,7 +276,7 @@ class SystemSlowWorkflow(BaseWorkflow):
         if not result:
             return AgentMessageResponse(
                 message=(
-                    "I did not receive a result from the local MCP server. "
+                    "I did not receive a result from the local app server. "
                     "Reply 'yes' to create a support ticket, or 'no' to cancel."
                 ),
                 workflow=self.workflow_id,

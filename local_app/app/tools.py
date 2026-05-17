@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import platform
 import shutil
+import subprocess
 from typing import Any, Dict, Iterable, List
 
 try:
@@ -42,7 +43,7 @@ def run_tool(name: str, context: DiagnosticContext) -> ToolResult:
     return ToolResult(
         name=name,
         status="skipped",
-        description="Tool is not allowlisted by this local diagnostic MCP server.",
+        description="Tool is not allowlisted by this local diagnostic app.",
         result={},
     )
 
@@ -107,6 +108,42 @@ def stop_edge_processes() -> Dict[str, Any]:
         "stopped_processes": stopped,
         "errors": errors,
     }
+
+
+def open_windows_update_settings() -> Dict[str, Any]:
+    uri = "ms-settings:windowsupdate"
+    if platform.system().lower() != "windows":
+        return {
+            "status": "unsupported",
+            "message": "Opening Windows Update settings is only supported on Windows.",
+            "opened_uri": uri,
+            "errors": ["unsupported_os"],
+        }
+
+    try:
+        os.startfile(uri)  # type: ignore[attr-defined]
+        return {
+            "status": "complete",
+            "message": "Opened Windows Update settings.",
+            "opened_uri": uri,
+            "errors": [],
+        }
+    except Exception as exc:
+        try:
+            subprocess.Popen(["cmd", "/c", "start", "", uri], shell=False)
+            return {
+                "status": "complete",
+                "message": "Opened Windows Update settings.",
+                "opened_uri": uri,
+                "errors": [],
+            }
+        except Exception as fallback_exc:
+            return {
+                "status": "failed",
+                "message": "Unable to open Windows Update settings.",
+                "opened_uri": uri,
+                "errors": [str(exc), str(fallback_exc)],
+            }
 
 
 def _system_profile(context: DiagnosticContext) -> ToolResult:

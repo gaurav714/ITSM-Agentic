@@ -8,7 +8,7 @@ from app.adapters.sccm.adapter import sccm_adapter
 
 
 def select_diagnostic_method(device_name: str) -> str:
-    """Priority: Intune -> SCCM -> Browser fallback with optional local MCP."""
+    """Priority: Intune -> SCCM -> Browser fallback with optional local app."""
     if intune_adapter.device_exists(device_name):
         return "intune"
     if sccm_adapter.device_exists(device_name):
@@ -46,12 +46,12 @@ def normalize_results(method: str, raw: Dict[str, Any]) -> Dict[str, Any]:
         metrics["device_memory_gb"] = raw.get("device_memory_gb")
         metrics["online"] = raw.get("online")
         metrics["page_load_ms"] = raw.get("page_load_ms")
-        metrics["local_mcp_available"] = raw.get("local_mcp_available", False)
-        metrics["local_mcp_error"] = raw.get("local_mcp_error")
-        metrics["local_mcp_response"] = raw.get("local_mcp_response")
-        if isinstance(raw.get("local_mcp_response"), dict):
-            local_mcp_response = raw["local_mcp_response"]
-            local_metrics = local_mcp_response.get("metrics")
+        metrics["local_app_available"] = raw.get("local_app_available", False)
+        metrics["local_app_error"] = raw.get("local_app_error")
+        metrics["local_app_response"] = raw.get("local_app_response")
+        if isinstance(raw.get("local_app_response"), dict):
+            local_app_response = raw["local_app_response"]
+            local_metrics = local_app_response.get("metrics")
             if isinstance(local_metrics, dict):
                 for key in (
                     "cpu_pct",
@@ -65,15 +65,15 @@ def normalize_results(method: str, raw: Dict[str, Any]) -> Dict[str, Any]:
                 ):
                     if metrics.get(key) in (None, []):
                         metrics[key] = local_metrics.get(key)
-            metrics["tool_candidates"] = local_mcp_response.get("tools", [])
-            metrics["remediation_actions"] = local_mcp_response.get("actions", [])
+            metrics["tool_candidates"] = local_app_response.get("tools", [])
+            metrics["remediation_actions"] = local_app_response.get("actions", [])
             metrics["edge_running"] = bool(metrics.get("edge_running")) or any(
                 action.get("id") == "stop_edge" and action.get("available")
                 for action in metrics["remediation_actions"]
                 if isinstance(action, dict)
             )
-            metrics["diagnostic_recommendation"] = local_mcp_response.get(
+            metrics["diagnostic_recommendation"] = local_app_response.get(
                 "recommendation"
             )
-            metrics["local_mcp_summary"] = local_mcp_response.get("summary")
+            metrics["local_app_summary"] = local_app_response.get("summary")
     return metrics

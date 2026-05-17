@@ -1,4 +1,4 @@
-"""Minimal MCP JSON-RPC surface for local diagnostic tools."""
+"""Minimal JSON-RPC surface for local diagnostic tools."""
 
 from __future__ import annotations
 
@@ -13,17 +13,17 @@ from app.schemas import (
     DiagnosticContext,
     DiagnosticSearchRequest,
 )
-from app.tools import stop_edge_processes
+from app.tools import open_windows_update_settings, stop_edge_processes
 
 
-class McpRequest(BaseModel):
+class LocalAppRequest(BaseModel):
     jsonrpc: str = "2.0"
     id: Optional[str | int] = None
     method: str
     params: Dict[str, Any] = Field(default_factory=dict)
 
 
-def handle_mcp_request(request: McpRequest) -> Dict[str, Any]:
+def handle_local_app_request(request: LocalAppRequest) -> Dict[str, Any]:
     if request.jsonrpc != "2.0":
         return _error(request.id, -32600, "Invalid JSON-RPC version.")
 
@@ -33,7 +33,7 @@ def handle_mcp_request(request: McpRequest) -> Dict[str, Any]:
             {
                 "protocolVersion": "2024-11-05",
                 "serverInfo": {
-                    "name": "local-diagnostic-mcp-server",
+                    "name": "local-diagnostic-app",
                     "version": "0.1.0",
                 },
                 "capabilities": {"tools": {}},
@@ -46,10 +46,10 @@ def handle_mcp_request(request: McpRequest) -> Dict[str, Any]:
     if request.method == "tools/call":
         return _call_tool(request)
 
-    return _error(request.id, -32601, f"Unsupported MCP method: {request.method}")
+    return _error(request.id, -32601, f"Unsupported local app method: {request.method}")
 
 
-def _call_tool(request: McpRequest) -> Dict[str, Any]:
+def _call_tool(request: LocalAppRequest) -> Dict[str, Any]:
     name = request.params.get("name")
     arguments = request.params.get("arguments") or {}
     if not isinstance(arguments, dict):
@@ -86,7 +86,30 @@ def _call_tool(request: McpRequest) -> Dict[str, Any]:
         ).model_dump()
         return _tool_result(request.id, response)
 
-    return _error(request.id, -32602, f"Unknown MCP tool: {name}")
+    if name == "actions.open_windows_update_settings":
+        action_request = ActionExecutionRequest(
+            action=str(arguments.get("action") or "open_windows_update_settings"),
+            context=_context_from_arguments(arguments),
+        )
+        if action_request.action != "open_windows_update_settings":
+            response = ActionExecutionResponse(
+                action=action_request.action,
+                status="rejected",
+                message="Only the open_windows_update_settings action is allowlisted here.",
+            ).model_dump()
+            return _tool_result(request.id, response)
+
+        result = open_windows_update_settings()
+        response = ActionExecutionResponse(
+            action="open_windows_update_settings",
+            status=result["status"],
+            message=result["message"],
+            errors=result["errors"],
+            opened_uri=result["opened_uri"],
+        ).model_dump()
+        return _tool_result(request.id, response)
+
+    return _error(request.id, -32602, f"Unknown local app tool: {name}")
 
 
 def _context_from_arguments(arguments: Dict[str, Any]) -> DiagnosticContext:
@@ -149,6 +172,26 @@ def _tool_definitions() -> list[Dict[str, Any]]:
                             "session_id": {"type": "string"},
                             "device_name": {"type": "string"},
                             "diagnostic_id": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "name": "actions.open_windows_update_settings",
+            "description": "Open Windows Update settings after explicit user approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "const": "open_windows_update_settings",
+                    },
+                    "context": {
+                        "type": "object",
+                        "properties": {
+                            "session_id": {"type": "string"},
+                            "device_name": {"type": "string"},
                         },
                     },
                 },

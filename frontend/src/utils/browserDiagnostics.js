@@ -1,9 +1,9 @@
-const LOCAL_MCP_SERVER_URL =
-  import.meta.env.VITE_LOCAL_MCP_SERVER_URL || "http://127.0.0.1:8765/mcp";
+const LOCAL_APP_URL =
+  import.meta.env.VITE_LOCAL_APP_URL || "http://127.0.0.1:8765/local-app";
 
 /**
  * Browser-side diagnostics. The browser first gathers its own limited metrics,
- * then optionally calls a local MCP diagnostic server for richer tool data.
+ * then optionally calls a local app diagnostic server for richer tool data.
  * The backend receives the combined payload.
  */
 export async function collectBrowserDiagnostics(context = {}) {
@@ -30,28 +30,34 @@ export async function collectBrowserDiagnostics(context = {}) {
     },
   };
 
-  const localMcp = await queryLocalMcpServer(browserMetrics, context);
+  const localApp = await queryLocalApp(browserMetrics, context);
 
   return {
     ...browserMetrics,
-    local_mcp_available: Boolean(localMcp.response),
-    local_mcp_response: localMcp.response,
-    local_mcp_error: localMcp.error,
+    local_app_available: Boolean(localApp.response),
+    local_app_response: localApp.response,
+    local_app_error: localApp.error,
   };
 }
 
-export async function executeLocalMcpAction(action, context = {}) {
-  if (action !== "stop_edge") {
+export async function executeLocalAppAction(action, context = {}) {
+  const toolsByAction = {
+    stop_edge: "actions.stop_edge",
+    open_windows_update_settings: "actions.open_windows_update_settings",
+  };
+  const toolName = toolsByAction[action];
+
+  if (!toolName) {
     return {
       action,
       status: "rejected",
-      message: "This local MCP action is not supported by the browser client.",
+      message: "This local app action is not supported by the browser client.",
       stopped_processes: [],
       errors: [],
     };
   }
 
-  return callLocalMcpTool("actions.stop_edge", {
+  return callLocalAppTool(toolName, {
     action,
     context: {
       session_id: context.sessionId,
@@ -61,12 +67,12 @@ export async function executeLocalMcpAction(action, context = {}) {
   });
 }
 
-async function queryLocalMcpServer(browserMetrics, context) {
+async function queryLocalApp(browserMetrics, context) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 2500);
 
   try {
-    const response = await callLocalMcpTool(
+    const response = await callLocalAppTool(
       "diagnostics.search",
       {
         query: "system is slow",
@@ -83,14 +89,14 @@ async function queryLocalMcpServer(browserMetrics, context) {
     return { response, error: null };
   } catch (error) {
     const name = error?.name === "AbortError" ? "timeout" : "unreachable";
-    return { response: null, error: `local_mcp_${name}` };
+    return { response: null, error: `local_app_${name}` };
   } finally {
     window.clearTimeout(timeout);
   }
 }
 
-async function callLocalMcpTool(name, args, signal) {
-  const response = await fetch(LOCAL_MCP_SERVER_URL, {
+async function callLocalAppTool(name, args, signal) {
+  const response = await fetch(LOCAL_APP_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal,
@@ -103,12 +109,12 @@ async function callLocalMcpTool(name, args, signal) {
   });
 
   if (!response.ok) {
-    throw new Error(`local_mcp_http_${response.status}`);
+    throw new Error(`local_app_http_${response.status}`);
   }
 
   const payload = await response.json();
   if (payload.error) {
-    throw new Error(payload.error.message || "local_mcp_error");
+    throw new Error(payload.error.message || "local_app_error");
   }
 
   return payload.result?.structuredContent || {};

@@ -1,13 +1,13 @@
-"""FastAPI entry point for the local diagnostic MCP server."""
+"""FastAPI entry point for the local diagnostic app."""
 
 from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.mcp import McpRequest, handle_mcp_request
+from app.local_app import LocalAppRequest, handle_local_app_request
 
-app = FastAPI(title="Local Diagnostic MCP Server", version="0.1.0")
+app = FastAPI(title="Local Diagnostic App", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +35,6 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/mcp")
-def mcp(req: McpRequest) -> dict:
-    return handle_mcp_request(req)
+@app.post("/local-app")
+def local_app(req: LocalAppRequest) -> dict:
+    return handle_local_app_request(req)

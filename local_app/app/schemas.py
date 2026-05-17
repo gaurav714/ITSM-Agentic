@@ -1,4 +1,4 @@
-"""Request/response schemas for the local diagnostic MCP server."""
+"""Request/response schemas for the local diagnostic app."""
 
 from __future__ import annotations
 
@@ -53,3 +53,4 @@ class ActionExecutionResponse(BaseModel):
     message: str
     stopped_processes: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
+    opened_uri: Optional[str] = None

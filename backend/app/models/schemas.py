@@ -49,9 +49,9 @@ class BrowserDiagnosticsPayload(BaseModel):
     online: Optional[bool] = None
     connection_type: Optional[str] = None
     page_load_ms: Optional[float] = None
-    local_mcp_available: bool = False
-    local_mcp_response: Optional[Dict[str, Any]] = None
-    local_mcp_error: Optional[str] = None
+    local_app_available: bool = False
+    local_app_response: Optional[Dict[str, Any]] = None
+    local_app_error: Optional[str] = None
     extra: Dict[str, Any] = Field(default_factory=dict)
 
 

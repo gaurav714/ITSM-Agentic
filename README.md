@@ -1,6 +1,6 @@
 # AI Helpdesk Assistant Platform
 
-Generic AI-powered IT helpdesk assistant with a modular workflow registry. Iteration 1 implements the **System Slow Diagnostics** workflow end-to-end with mock Intune / SCCM adapters and a real browser-diagnostics fallback that can enrich results through a local MCP diagnostic server. Other workflows (Password Reset, VPN Access, …) are registered as "Coming soon" placeholders so the architecture is ready for them.
+Generic AI-powered IT helpdesk assistant with a modular workflow registry. Iteration 1 implements the **System Slow Diagnostics** workflow end-to-end with mock Intune / SCCM adapters and a real browser-diagnostics fallback that can enrich results through a local app. Other workflows (Password Reset, VPN Access, …) are registered as "Coming soon" placeholders so the architecture is ready for them.
 
 ## Project layout
 
@@ -42,15 +42,15 @@ App: <http://localhost:5173>
 2. When prompted, enter a device name. Built-in mocks:
    - `LAPTOP-INTUNE-01` → Intune adapter path (high CPU/memory)
    - `DESKTOP-SCCM-42` → SCCM adapter path
-   - any other name → browser fallback (frontend submits real browser metrics and, when available, local MCP diagnostic tool results)
+   - any other name → browser fallback (frontend submits real browser metrics and, when available, local app diagnostic tool results)
 3. Review the diagnostic and ticket-draft cards; reply `yes` to create the mock ticket.
 4. Visit **Tickets** to see the created mock tickets.
 
 ## Architecture notes
 
 - **Workflow registry** (`app/services/workflow_registry.py`) — every workflow implements `BaseWorkflow.handle(session, message)`. Adding a new workflow = new module + one registry entry.
-- **Diagnostic router** (`app/services/diagnostic_router.py`) — fixed priority: Intune → SCCM → Browser fallback. Browser fallback can call the local MCP diagnostic server over localhost. Adapters share a uniform `device_exists` / `collect` shape.
-- **Local MCP server** (`local_mcp_server/`) — localhost MCP JSON-RPC server exposing allowlisted diagnostic/remediation tools for the browser fallback.
+- **Diagnostic router** (`app/services/diagnostic_router.py`) — fixed priority: Intune → SCCM → Browser fallback. Browser fallback can call the local app over localhost. Adapters share a uniform `device_exists` / `collect` shape.
+- **Local app server** (`local_app/`) — localhost local app exposing allowlisted diagnostic/remediation tools for the browser fallback.
 - **Cards** — backend returns generic `UICard{kind,data}` items; the frontend has a card-renderer registry, so new workflows can ship new card kinds without changing `ChatWindow`.
 - **Security** — the LLM never executes commands. It only classifies intent and (optionally) summarizes results. Tickets are only created after explicit user confirmation. Adapters are an allowlist.
 
@@ -61,5 +61,5 @@ App: <http://localhost:5173>
 | 1 (this)  | Generic shell + System Slow + mocks |
 | 2         | Real Intune via Microsoft Graph     |
 | 3         | Real SCCM/MECM                      |
-| 4         | Hardened local MCP deployment       |
+| 4         | Hardened local app deployment       |
 | 5         | ServiceNow / Jira ticketing         |

@@ -14,6 +14,10 @@ from app.workflows.system_slow.prompts import INTENT_CLASSIFY_PROMPT
 
 _KEYWORD_RULES = [
     (
+        r"\b(windows update|update failure|update failed|windows patch|patching failed|0x[0-9a-f]{4,})\b",
+        "windows_update_failure",
+    ),
+    (
         r"\b(slow|hang|hanging|freez(e|ing)|laggy|performance|sluggish|crawling|unresponsive|stutter(ing)?|takes?\s+forever)\b",
         "system_slow_diagnostics",
     ),
@@ -71,6 +75,7 @@ def _classify_with_llm(message: str) -> Optional[str]:
         valid = {
             "system_slow_diagnostics",
             "new_employee_onboarding",
+            "windows_update_failure",
             "password_reset",
             "vpn_access",
             "software_install",

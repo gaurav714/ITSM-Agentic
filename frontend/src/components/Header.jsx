@@ -3,9 +3,9 @@ import { Link } from "react-router-dom";
 export default function Header() {
   return (
     <header className="flex h-[78px] items-center justify-between border-b border-slate-100 bg-white px-6 shadow-sm shadow-slate-200/30 lg:px-[60px]">
-      <Link to="/" className="flex items-center gap-1.5" aria-label="Zoe home">
+      <Link to="/" className="flex items-center gap-1.5" aria-label="Zoé home">
         <span className="text-[30px] font-black leading-none tracking-normal text-slate-950">
-          zoe
+          Zoé
         </span>
         <span className="-mt-5 h-2.5 w-4 rotate-[20deg] rounded-sm bg-brand" />
       </Link>

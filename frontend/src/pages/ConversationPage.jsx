@@ -10,7 +10,7 @@ import {
 } from "../api/diagnosticApi.js";
 import {
   collectBrowserDiagnostics,
-  executeLocalMcpAction,
+  executeLocalAppAction,
 } from "../utils/browserDiagnostics.js";
 
 export default function ConversationPage() {
@@ -43,7 +43,7 @@ export default function ConversationPage() {
           sessionId,
           addAssistantResponse,
         );
-        await maybeAutoExecuteLocalMcpAction(
+        await maybeAutoExecuteLocalAppAction(
           resp,
           sessionId,
           addAssistantResponse,
@@ -66,7 +66,7 @@ export default function ConversationPage() {
         sessionId,
         addAssistantResponse,
       );
-      await maybeAutoExecuteLocalMcpAction(
+      await maybeAutoExecuteLocalAppAction(
         resp,
         sessionId,
         addAssistantResponse,
@@ -96,6 +96,7 @@ export default function ConversationPage() {
       : "Awaiting first message...";
   const confidence = messages.length ? Math.min(96, 42 + messages.length * 13) : 0;
   const workflowLabel = workflow ? workflow.replaceAll("_", " ") : "Password Reset";
+  const expectedResponses = getExpectedResponses(workflow);
 
   return (
     <div className="h-full overflow-hidden bg-white">
@@ -111,7 +112,7 @@ export default function ConversationPage() {
           <Panel
             icon="spark"
             iconTone="from-indigo-500 to-brand"
-            title="Zoe · IT Assistant"
+            title="Zoé · IT Assistant"
             subtitle={toTitleCase(workflowLabel)}
             status={<StatusPill tone="emerald" label={loading ? "working" : "online"} />}
           >
@@ -148,6 +149,21 @@ export default function ConversationPage() {
 
               <MetricBlock kicker="Next action" title={toTitleCase(nextActionForState(state, loading))} />
 
+              {expectedResponses.length > 0 && (
+                <div>
+                  <SectionHeader
+                    icon="list"
+                    label="Expected responses"
+                    value={`${expectedResponses.length} steps`}
+                  />
+                  <div className="mt-3 flex flex-col gap-3">
+                    {expectedResponses.map((item, idx) => (
+                      <ExpectedResponseItem key={`${item.state}-${idx}`} item={item} active={item.state === state} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <SectionHeader
                   icon="list"
@@ -156,7 +172,7 @@ export default function ConversationPage() {
                 />
                 <div className="mt-3 border-l border-slate-200 pl-4 text-sm leading-6 text-slate-600">
                   {cards.length === 0
-                    ? "Actions will stream here as Zoe executes her runbook."
+                    ? "Actions will stream here as Zoé executes her runbook."
                     : cards.slice(-5).map((card) => (
                         <p key={`${card.kind}-${card.ts}`}>
                           {describeCardEvent(card)}
@@ -281,6 +297,29 @@ function SmallMetric({ kicker, title, detail, progress }) {
   );
 }
 
+function ExpectedResponseItem({ item, active }) {
+  return (
+    <section
+      className={`rounded-lg border px-3 py-3 text-sm ${
+        active
+          ? "border-blue-200 bg-blue-50 text-slate-900"
+          : "border-slate-200 bg-white text-slate-700"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="font-semibold">{item.user}</p>
+        <span className="shrink-0 rounded-md bg-slate-100 px-2 py-1 font-mono text-[10px] uppercase text-slate-600">
+          {item.state}
+        </span>
+      </div>
+      <p className="mt-2 whitespace-pre-wrap leading-5 text-slate-600">{item.assistant}</p>
+      {item.action && (
+        <p className="mt-2 font-mono text-xs text-blue-700">action:{item.action}</p>
+      )}
+    </section>
+  );
+}
+
 function SectionHeader({ icon, label, value }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -380,6 +419,9 @@ function nextActionForState(state, loading) {
   if (loading) return "Processing";
   const labels = {
     idle: "Idle",
+    awaiting_fix_result: "Guide troubleshooting",
+    awaiting_access_approval: "Request local access",
+    awaiting_settings_action: "Open Windows Update settings",
     awaiting_browser_diagnostics: "Collect diagnostics",
     awaiting_remediation_confirmation: "Confirm remediation",
     awaiting_remediation_action: "Run local action",
@@ -419,6 +461,43 @@ function formatLogLine(card, latestDiagnostic) {
   return `event:${card.kind} ok`;
 }
 
+function getExpectedResponses(workflow) {
+  if (workflow !== "windows_update_failure") return [];
+
+  return [
+    {
+      user: "Windows update is failing",
+      state: "awaiting_fix_result",
+      assistant:
+        "Let's try the common Windows Update fixes first:\n\n1. Confirm you are connected to VPN if your company requires it for updates.\n2. Check that your internet connection is stable.\n3. Restart the device, then try Windows Update again.\n4. Make sure there is enough free disk space for the update.\n\nAfter trying those, tell me whether the update is working or if the issue is still happening.",
+    },
+    {
+      user: "I am connected to the VPN",
+      state: "awaiting_fix_result",
+      assistant:
+        "Thanks, I have noted that VPN is connected. Is Windows Update still failing after checking that?",
+    },
+    {
+      user: "yes still failing",
+      state: "awaiting_access_approval",
+      assistant:
+        "Thanks for checking. The next step needs local workstation access. Allow agent to access this device and open Windows Update settings?",
+    },
+    {
+      user: "yes / ok / allow",
+      state: "awaiting_settings_action",
+      assistant: "I'll ask the local app server to open Windows Update settings now.",
+      action: "open_windows_update_settings",
+    },
+    {
+      user: "local app action complete",
+      state: "complete",
+      assistant:
+        "Windows Update settings should be open now. Please review the update error there and try running the update again.",
+    },
+  ];
+}
+
 function toTitleCase(value) {
   return String(value || "")
     .replaceAll("_", " ")
@@ -449,32 +528,32 @@ async function maybeAutoSubmitBrowserDiagnostics(
   }
 }
 
-async function maybeAutoExecuteLocalMcpAction(
+async function maybeAutoExecuteLocalAppAction(
   resp,
   sessionId,
   addAssistantResponse,
 ) {
-  const actionRequest = resp?.metadata?.trigger_local_mcp_action;
+  const actionRequest = resp?.metadata?.trigger_local_app_action;
   if (!actionRequest?.action) return;
 
   try {
-    const result = await executeLocalMcpAction(actionRequest.action, {
+    const result = await executeLocalAppAction(actionRequest.action, {
       sessionId,
       deviceName: actionRequest.device_name,
       diagnosticId: actionRequest.diagnostic_id,
     });
     await submitLocalActionResult(sessionId, result);
-    const next = await sendAgentMessage(sessionId, "local MCP action complete");
+    const next = await sendAgentMessage(sessionId, "local app action complete");
     addAssistantResponse(next);
   } catch (error) {
     await submitLocalActionResult(sessionId, {
       action: actionRequest.action,
       status: "failed",
-      message: "Unable to contact the local MCP diagnostic server.",
+      message: "Unable to contact the local app diagnostic server.",
       stopped_processes: [],
-      errors: [error?.message || "local_mcp_unreachable"],
+      errors: [error?.message || "local_app_unreachable"],
     });
-    const next = await sendAgentMessage(sessionId, "local MCP action failed");
+    const next = await sendAgentMessage(sessionId, "local app action failed");
     addAssistantResponse(next);
   }
 }

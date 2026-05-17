@@ -55,7 +55,7 @@ export default function ChatWindow({ messages, cards, loading }) {
               Press Play to start the conversation
             </p>
             <p className="mt-2 max-w-xs text-sm leading-6 text-slate-600">
-              You will see a realistic interaction between a user and Zoe.
+              You will see a realistic interaction between a user and Zoé.
             </p>
           </div>
         )}
