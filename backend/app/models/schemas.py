@@ -45,7 +45,7 @@ class BrowserDiagnosticsPayload(BaseModel):
     user_agent: Optional[str] = None
     platform: Optional[str] = None
     cpu_cores: Optional[int] = None
-new buildsdsadsadsadsadasdasdasdasd    browser_hardware_concurrency: Optional[int] = None
+    browser_hardware_concurrency: Optional[int] = None
     physical_cpu_cores: Optional[int] = None
     logical_cpu_cores: Optional[int] = None
     device_memory_gb: Optional[float] = None
