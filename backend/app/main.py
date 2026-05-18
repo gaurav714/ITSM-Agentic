@@ -21,6 +21,7 @@ from app.models.schemas import (
     BrowserDiagnosticsPayload,
     DiagnosticResultResponse,
     DiagnosticStartRequest,
+    LocalActionRequest,
     LocalActionResultPayload,
     TicketCreateRequest,
     TicketCreateResponse,
@@ -28,6 +29,7 @@ from app.models.schemas import (
     TicketDraftRequest,
 )
 from app.services.diagnostic_router import run_diagnostics
+from app.services.local_diagnostic_tools import execute_local_action
 from app.services.ticket_service import create_ticket, generate_ticket_draft
 from app.services.workflow_registry import list_workflows
 
@@ -114,10 +116,23 @@ def diagnostics_browser(payload: BrowserDiagnosticsPayload) -> dict:
     return {"status": "received"}
 
 
-@app.post("/diagnostics/local-action")
-def diagnostics_local_action(payload: LocalActionResultPayload) -> dict:
-    session_store.update(payload.session_id, local_action_result=payload.model_dump())
-    return {"status": "received"}
+@app.post("/diagnostics/action", response_model=LocalActionResultPayload)
+def diagnostics_action(req: LocalActionRequest) -> LocalActionResultPayload:
+    result = execute_local_action(
+        req.action,
+        {
+            "session_id": req.session_id,
+            "device_name": req.device_name,
+            "diagnostic_id": req.diagnostic_id,
+        },
+    )
+    payload = LocalActionResultPayload(
+        session_id=req.session_id,
+        **result.model_dump(),
+        raw=result.model_dump(),
+    )
+    session_store.update(req.session_id, local_action_result=payload.model_dump())
+    return payload
 
 
 # ---- Tickets -----------------------------------------------------------------

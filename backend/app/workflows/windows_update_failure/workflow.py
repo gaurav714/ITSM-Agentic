@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.models.schemas import AgentMessageResponse, UICard
 from app.services.llm import llm_structured
+from app.services.workflow_turn_agent import agent_metadata, choose_workflow_tool
 from app.workflows.base import BaseWorkflow
 
 _AFFIRMATIVE = {
@@ -110,6 +111,7 @@ class _FollowupClassification(BaseModel):
     ]
     known_facts: list[str] = Field(default_factory=list)
     summary: str = ""
+    selected_tool: str = "deterministic_fallback"
 
 
 class WindowsUpdateFailureWorkflow(BaseWorkflow):
@@ -248,6 +250,7 @@ class WindowsUpdateFailureWorkflow(BaseWorkflow):
                     },
                 )
             ],
+            metadata=_metadata("ask_fix_followup"),
         )
         return {**state, "response": response}
 
@@ -271,6 +274,7 @@ class WindowsUpdateFailureWorkflow(BaseWorkflow):
                     },
                 )
             ],
+            metadata=_metadata(state.get("decision")),
         )
         return {**state, "response": response}
 
@@ -292,16 +296,18 @@ class WindowsUpdateFailureWorkflow(BaseWorkflow):
                     },
                 )
             ],
+            metadata=_metadata("request_local_access"),
         )
         return {**state, "response": response}
 
     def _trigger_settings_action(self, state: WindowsUpdateState) -> WindowsUpdateState:
         response = AgentMessageResponse(
-            message="I'll ask the local app server to open Windows Update settings now.",
+            message="I'll ask the backend-local tools to open Windows Update settings now.",
             workflow=self.workflow_id,
             state="awaiting_settings_action",
             metadata={
-                "trigger_local_app_action": {
+                **_metadata("open_update_settings"),
+                "trigger_backend_action": {
                     "action": "open_windows_update_settings",
                     "device_name": "LOCAL-ENDPOINT",
                 }
@@ -325,6 +331,7 @@ class WindowsUpdateFailureWorkflow(BaseWorkflow):
             message=message,
             workflow=self.workflow_id,
             state="complete",
+            metadata=_metadata("finish_workflow"),
             requires_input=False,
         )
         return {**state, "response": response}
@@ -341,6 +348,7 @@ class WindowsUpdateFailureWorkflow(BaseWorkflow):
             message=message,
             workflow=self.workflow_id,
             state=next_state,
+            metadata=_metadata("ask_fix_followup"),
         )
         return {**state, "response": response}
 
@@ -363,6 +371,32 @@ def _has_phrase(text: str, phrases: set[str]) -> bool:
 def _classify_followup(
     session_state: str, message: str
 ) -> _FollowupClassification:
+    selected = choose_workflow_tool(
+        agent_name="windows_update_conversation_agent",
+        system_prompt=(
+            "You are a tool-constrained Windows Update workflow agent. Choose "
+            "exactly one provided tool. Never open settings unless the user has "
+            "explicitly approved local access."
+        ),
+        objective={
+            "session_state": session_state,
+            "user_message": message,
+            "guardrails": [
+                "Ask users to try safe checks before requesting local access.",
+                "Opening Windows Update settings requires explicit approval.",
+            ],
+        },
+        tool_options={
+            "record_user_check": "Record a user troubleshooting check or context.",
+            "ask_fix_followup": "Ask whether Windows Update is still failing.",
+            "request_local_access": "Request approval to open Windows Update settings.",
+            "open_update_settings": "Open Windows Update settings after approval.",
+            "finish_workflow": "Finish because the issue is resolved or access is denied.",
+        },
+    )
+    if selected:
+        return _classification_from_agent_tool(session_state, selected["tool"], message)
+
     llm_result = llm_structured(
         _FOLLOWUP_PROMPT.format(session_state=session_state, message=message),
         _FollowupClassification,
@@ -370,6 +404,31 @@ def _classify_followup(
     if llm_result is not None:
         return _normalize_classification(llm_result, session_state, message)
     return _fallback_classify_followup(session_state, message)
+
+
+def _classification_from_agent_tool(
+    session_state: str, tool_name: str, message: str
+) -> _FollowupClassification:
+    facts = _extract_known_facts(message)
+    if session_state == "awaiting_access_approval":
+        mapping = {
+            "open_update_settings": "approve_access",
+            "finish_workflow": "deny_access",
+            "ask_fix_followup": "unclear",
+        }
+    else:
+        mapping = {
+            "record_user_check": "partial_update",
+            "ask_fix_followup": "partial_update",
+            "request_local_access": "still_failing",
+            "finish_workflow": "resolved",
+        }
+    return _FollowupClassification(
+        reply_type=mapping.get(tool_name, "unclear"),
+        known_facts=facts,
+        summary=_facts_summary(facts),
+        selected_tool=tool_name,
+    )
 
 
 def _normalize_classification(
@@ -393,6 +452,7 @@ def _normalize_classification(
         reply_type=reply_type,
         known_facts=facts,
         summary=summary,
+        selected_tool=result.selected_tool,
     )
 
 
@@ -452,3 +512,10 @@ def _merge_facts(existing: list[str], incoming: list[str]) -> list[str]:
         if fact in _FACT_PATTERNS and fact not in merged:
             merged.append(fact)
     return merged
+
+
+def _metadata(next_action: str | None) -> Dict[str, Any]:
+    trace = []
+    if next_action:
+        trace.append({"tool": next_action, "status": "selected"})
+    return agent_metadata("windows_update_conversation_agent", trace, next_action)

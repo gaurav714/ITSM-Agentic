@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from app.adapters.identity.mock_identity_adapter import mock_identity_adapter
 from app.models.schemas import AgentMessageResponse, UICard
 from app.services.llm import llm_structured
+from app.services.workflow_turn_agent import agent_metadata, choose_workflow_tool
 from app.workflows.employee_onboarding.agent import run_onboarding_agent
 from app.workflows.base import BaseWorkflow
 
@@ -84,6 +85,8 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
     ) -> AgentMessageResponse:
         state = session.get("state", "idle")
         msg = (user_message or "").strip()
+        selected_tool = _choose_onboarding_tool(session, state, msg)
+        session["last_onboarding_agent_tool"] = selected_tool
 
         if state in ("idle", None) or session.get("workflow") != self.workflow_id:
             self._start_new_request(session)
@@ -96,6 +99,7 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
                 ),
                 workflow=self.workflow_id,
                 state="awaiting_employee_details",
+                metadata=_metadata("ask_missing_details"),
             )
 
         if state == "awaiting_employee_details":
@@ -112,13 +116,14 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
             if _NEW_ONBOARDING_RE.search(msg):
                 self._start_new_request(session)
                 return AgentMessageResponse(
-                    message=(
-                        "Let's start another onboarding request. Please provide the employee's "
-                        "full name, work email, department, and role."
-                    ),
-                    workflow=self.workflow_id,
-                    state="awaiting_employee_details",
-                )
+                message=(
+                    "Let's start another onboarding request. Please provide the employee's "
+                    "full name, work email, department, and role."
+                ),
+                workflow=self.workflow_id,
+                state="awaiting_employee_details",
+                metadata=_metadata("ask_missing_details"),
+            )
             return AgentMessageResponse(
                 message=(
                     f"Onboarding request {session.get('onboarding_id')} is complete. "
@@ -126,6 +131,7 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
                 ),
                 workflow=self.workflow_id,
                 state="complete",
+                metadata=_metadata("finish_workflow"),
                 requires_input=True,
             )
 
@@ -133,6 +139,7 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
             message="Please provide the employee's full name, work email, department, and role.",
             workflow=self.workflow_id,
             state="awaiting_employee_details",
+            metadata=_metadata("ask_missing_details"),
         )
 
     def _start_new_request(self, session: Dict[str, Any]) -> None:
@@ -169,6 +176,7 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
                 message="I still need: " + ", ".join(missing) + ".",
                 workflow=self.workflow_id,
                 state="awaiting_employee_details",
+                metadata=_metadata("ask_missing_details"),
             )
 
         groups = self._groups_for_role(employee["role"])
@@ -193,6 +201,7 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
                     },
                 )
             ],
+            metadata=_metadata("confirm_ready"),
         )
 
     def _handle_confirmation(
@@ -205,6 +214,7 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
                 message="Onboarding cancelled. No account or access changes were made.",
                 workflow=self.workflow_id,
                 state="idle",
+                metadata=_metadata("cancel_onboarding"),
                 requires_input=False,
             )
         if decision == "unclear":
@@ -212,6 +222,7 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
                 message="Please reply 'yes' to provision onboarding or 'no' to cancel.",
                 workflow=self.workflow_id,
                 state="awaiting_confirmation",
+                metadata=_metadata("confirm_ready"),
             )
 
         employee = session["employee"]
@@ -240,6 +251,7 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
                         },
                     )
                 ],
+                metadata=_metadata("check_duplicate_identity"),
                 requires_input=False,
             )
 
@@ -267,6 +279,10 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
             workflow=self.workflow_id,
             state="complete",
             cards=[UICard(kind="onboarding_progress", data=result)],
+            metadata={
+                **_metadata("execute_onboarding"),
+                "tool_trace": result["tool_trace"],
+            },
             requires_input=False,
         )
 
@@ -475,3 +491,39 @@ class NewEmployeeOnboardingWorkflow(BaseWorkflow):
         if result is not None:
             return result.decision
         return "unclear"
+
+
+def _choose_onboarding_tool(session: Dict[str, Any], state: str, message: str) -> str:
+    selected = choose_workflow_tool(
+        agent_name="onboarding_conversation_agent",
+        system_prompt=(
+            "You are a tool-constrained onboarding workflow agent. Choose exactly "
+            "one provided tool. Never execute onboarding unless the user has "
+            "explicitly confirmed provisioning."
+        ),
+        objective={
+            "session_state": state,
+            "user_message": message,
+            "known_employee_fields": sorted((session.get("employee") or {}).keys()),
+            "guardrails": [
+                "Ask for missing required employee details.",
+                "Check duplicate identity before account creation.",
+                "Provision only after explicit confirmation.",
+            ],
+        },
+        tool_options={
+            "ask_missing_details": "Ask for missing employee full name, work email, department, or role.",
+            "confirm_ready": "Ask the user to confirm the interpreted onboarding request.",
+            "check_duplicate_identity": "Check for an existing identity before provisioning.",
+            "execute_onboarding": "Execute approved onboarding tools after confirmation.",
+            "cancel_onboarding": "Cancel the onboarding request.",
+        },
+    )
+    return selected["tool"] if selected else "deterministic_fallback"
+
+
+def _metadata(next_action: str | None) -> Dict[str, Any]:
+    trace = []
+    if next_action:
+        trace.append({"tool": next_action, "status": "selected"})
+    return agent_metadata("onboarding_conversation_agent", trace, next_action)

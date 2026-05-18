@@ -46,13 +46,15 @@ def handle_user_message(
         "idle",
         "complete",
     ):
-        if _is_sticky_workflow_turn(current_workflow, current_state):
-            workflow_id = current_workflow
+        requested_workflow = classify_intent(message)
+        if (
+            requested_workflow not in ("unknown", current_workflow)
+            and _looks_like_explicit_workflow_switch(message, requested_workflow)
+        ):
+            _reset_workflow_context(session)
+            workflow_id = requested_workflow
         else:
-            requested_workflow = classify_intent(message)
-            if requested_workflow not in ("unknown", current_workflow):
-                _reset_workflow_context(session)
-                workflow_id = requested_workflow
+            workflow_id = current_workflow
 
     # If there's no active workflow, classify intent.
     elif not workflow_id or session.get("state") in (None, "idle", "complete"):
@@ -73,6 +75,12 @@ def handle_user_message(
         return response
 
     response = workflow.handle(session, message)
+    if response.workflow:
+        session["workflow"] = response.workflow
+    if response.state:
+        session["state"] = response.state
+    if response.metadata:
+        session["last_agent_metadata"] = response.metadata
     session_store.append_message(session_id, "assistant", response.message)
     return response
 
@@ -87,13 +95,44 @@ def _looks_like_onboarding_followup(message: str) -> bool:
     )
 
 
-def _is_sticky_workflow_turn(workflow_id: str, state: str | None) -> bool:
-    """Keep short in-workflow replies away from global intent routing."""
-    return workflow_id == "windows_update_failure" and state in {
-        "awaiting_fix_result",
-        "awaiting_access_approval",
-        "awaiting_settings_action",
+def _looks_like_explicit_workflow_switch(
+    message: str, requested_workflow: str | None
+) -> bool:
+    """Return True only when the user is asking to start another workflow."""
+    if not message or not requested_workflow or requested_workflow == "unknown":
+        return False
+
+    text = message.lower()
+    action_pattern = (
+        r"\b(start|open|switch|change|new|request|create|begin|launch)\b"
+        r"|\bhelp\s+me\s+with\b"
+        r"|\bi\s+need\s+(?:a|an)?\s*\w*"
+    )
+    if not re.search(action_pattern, text):
+        return False
+
+    workflow_terms = {
+        "system_slow_diagnostics": (
+            "system slow",
+            "slow diagnostics",
+            "performance",
+            "lagging",
+        ),
+        "new_employee_onboarding": (
+            "onboarding",
+            "new employee",
+            "new hire",
+            "joiner",
+        ),
+        "windows_update_failure": ("windows update", "update failure", "patch"),
+        "password_reset": ("password reset", "reset password", "forgot password"),
+        "vpn_access": ("vpn access", "remote access", "vpn request"),
+        "software_install": ("software install", "software installation", "install software"),
+        "account_unlock": ("account unlock", "unlock account", "locked account"),
+        "ticket_status": ("ticket status", "status of ticket", "lookup ticket"),
+        "application_outage": ("application outage", "app outage", "service down"),
     }
+    return any(term in text for term in workflow_terms.get(requested_workflow, ()))
 
 
 def _reset_workflow_context(session: Dict[str, Any]) -> None:

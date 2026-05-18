@@ -72,6 +72,18 @@ class MockIdentityAdapter:
             lambda user: {**user, "welcome_email_sent": True},
         )
 
+    def mark_password_reset_requested(self, email: str) -> Dict:
+        return self._update_user(
+            email,
+            lambda user: {**user, "password_reset_requested": True},
+        )
+
+    def unlock_account(self, email: str) -> Dict:
+        return self._update_user(
+            email,
+            lambda user: {**user, "locked": False, "status": "unlocked"},
+        )
+
     def list_users(self) -> List[Dict]:
         with self._lock:
             return sorted(self._read().values(), key=lambda user: user["full_name"])

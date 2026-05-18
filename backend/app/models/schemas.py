@@ -42,6 +42,8 @@ class DiagnosticResultResponse(BaseModel):
 
 class BrowserDiagnosticsPayload(BaseModel):
     session_id: str
+    device_name: Optional[str] = None
+    diagnostic_id: Optional[str] = None
     user_agent: Optional[str] = None
     platform: Optional[str] = None
     cpu_cores: Optional[int] = None
@@ -49,9 +51,6 @@ class BrowserDiagnosticsPayload(BaseModel):
     online: Optional[bool] = None
     connection_type: Optional[str] = None
     page_load_ms: Optional[float] = None
-    local_app_available: bool = False
-    local_app_response: Optional[Dict[str, Any]] = None
-    local_app_error: Optional[str] = None
     extra: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -62,7 +61,15 @@ class LocalActionResultPayload(BaseModel):
     message: str
     stopped_processes: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
+    opened_uri: Optional[str] = None
     raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+class LocalActionRequest(BaseModel):
+    session_id: str
+    action: str
+    device_name: Optional[str] = None
+    diagnostic_id: Optional[str] = None
 
 
 class TicketDraftRequest(BaseModel):

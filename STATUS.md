@@ -1,6 +1,6 @@
 # Project Status — AI Helpdesk Assistant Platform
 
-_Last updated: 2026-05-16_
+_Last updated: 2026-05-18_
 
 ## Overview
 
@@ -22,17 +22,18 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | Workflow registry pattern                                           | ✅     | [workflow_registry.py](backend/app/services/workflow_registry.py)                     |
 | `BaseWorkflow` abstract contract                                    | ✅     | [base.py](backend/app/workflows/base.py)                                              |
 | New Employee Onboarding workflow                                    | ✅     | LangGraph tool-using agent, duplicate check, mock identity DB, RBAC groups, MFA, welcome email |
-| Windows Update Failure workflow                                     | ✅     | LangGraph + LLM-assisted follow-up interpretation, guided fixes first, local access approval gate, local app action to open Windows Update settings |
+| Windows Update Failure workflow                                     | ✅     | LangGraph + LLM-assisted follow-up interpretation, guided fixes first, local access approval gate, backend-local action to open Windows Update settings |
 | In-memory session store                                             | ✅     | [session_store.py](backend/app/memory/session_store.py) — replace with Redis/DB later |
-| Diagnostic router (priority: Intune → SCCM → Browser + local app)   | ✅     | [diagnostic_router.py](backend/app/services/diagnostic_router.py)                     |
+| Diagnostic router (priority: Intune → SCCM → Browser + backend-local tools) | ✅     | [diagnostic_router.py](backend/app/services/diagnostic_router.py)                     |
 | Mock Intune adapter                                                 | ✅     | `LAPTOP-INTUNE-01`                                                                    |
 | Mock SCCM adapter                                                   | ✅     | `DESKTOP-SCCM-42`                                                                     |
 | Browser diagnostics adapter                                         | ✅     | Real metrics pushed from frontend                                                     |
 | Mock ticketing adapter                                              | ✅     | Returns `INC########` ids                                                             |
 | Conversation agent / message router                                 | ✅     | [conversation_agent.py](backend/app/agents/conversation_agent.py)                     |
-| Browser → local diagnostic app → backend handoff             | ✅     | Browser can call a user-system local app and submit its structured response with diagnostics |
-| Local diagnostic app scaffold                                | ✅     | [local_app](local_app) exposes localhost `/local-app` with `tools/list` and `tools/call` |
-| Local remediation action handoff                                    | ✅     | User can approve the local app server to stop Microsoft Edge before ticket creation    |
+| Browser → backend-local diagnostic handoff                  | ✅     | Browser submits browser telemetry and backend-local tools enrich diagnostics          |
+| Backend-local diagnostic tools                               | ✅     | [local_diagnostic_tools.py](backend/app/services/local_diagnostic_tools.py) exposes allowlisted diagnostics/actions |
+| Local remediation action handoff                                    | ✅     | User can approve backend-local tools to stop Microsoft Edge before ticket creation     |
+| Legacy workstation prototypes removed                               | ✅     | Removed unused workstation-local prototype directories; backend-local tools are the active path |
 
 ### Backend — **Agentic** capabilities (LLM-active when `OPENAI_API_KEY` is set)
 
@@ -45,7 +46,7 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | LLM-generated ticket draft (title, description, priority) | ✅     | [ticket_service.py](backend/app/services/ticket_service.py)                              |
 | Shared LLM client + structured-output helper              | ✅     | [llm.py](backend/app/services/llm.py)                                                    |
 | Deterministic fallback for every LLM call                 | ✅     | Works without API key                                                                    |
-| Local app telemetry ingestion                             | ✅     | Browser-submitted local app output is normalized, summarized, and used before ticketing |
+| Backend-local telemetry enrichment                         | ✅     | Backend-local diagnostic output is normalized, summarized, and used before ticketing   |
 
 ### Backend — REST endpoints (all working)
 
@@ -80,12 +81,12 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | `system_slow_diagnostics` | System Slow Diagnostics | ✅             |
 | `new_employee_onboarding` | New Employee Onboarding | ✅             |
 | `windows_update_failure`  | Windows Update Failure  | ✅             |
-| `password_reset`          | Password Reset          | ⏳ Coming soon |
-| `vpn_access`              | VPN Access Request      | ⏳ Coming soon |
-| `software_install`        | Software Installation   | ⏳ Coming soon |
-| `account_unlock`          | Account Unlock          | ⏳ Coming soon |
-| `ticket_status`           | Ticket Status Lookup    | ⏳ Coming soon |
-| `application_outage`      | Application Outage      | ⏳ Coming soon |
+| `password_reset`          | Password Reset          | ✅ Active |
+| `vpn_access`              | VPN Access Request      | ✅ Active |
+| `software_install`        | Software Installation   | ✅ Active |
+| `account_unlock`          | Account Unlock          | ✅ Active |
+| `ticket_status`           | Ticket Status Lookup    | ✅ Active |
+| `application_outage`      | Application Outage      | ✅ Active |
 
 > **Removed from scope:** `deployment_request` and `kubernetes_issue` (no longer registered).
 
@@ -108,7 +109,7 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
 | 1   | **Real LangGraph execution path** — current `StateGraph` nodes are pass-throughs; `handle()` is a hand-coded ladder. Move logic into nodes with conditional edges driven by session state.                               | Enables tracing, replay, and easier branching for future workflows.  |
 | 2   | **LangGraph checkpointer** (e.g. `MemorySaver` / SQLite) keyed by `session_id`.                                                                                                                                          | Replaces the custom in-memory dict store; adds replay & persistence. |
-| 3   | **Package/install the user-system local app** — create installer/service packaging, startup policy, auth token/CORS hardening, and signed distribution for the workstation app. | The scaffold exists; packaging and hardening make it deployable beyond local development. |
+| 3   | **Harden backend-local endpoint diagnostics** — add auth, auditing, and deployment guardrails for workstation-local backend execution. | Tools now run through the backend; hardening makes that path production-ready. |
 | 4   | **Multi-turn conversation memory** with rolling summary.                                                                                                                                                                 | Long sessions don't blow the context window.                         |
 | 5   | **Streaming responses** (SSE) from `/agent/message`.                                                                                                                                                                     | Token-level UX in the chat.                                          |
 | 6   | **LangSmith tracing** (`LANGCHAIN_TRACING_V2=true`).                                                                                                                                                                     | Observability for every LLM/tool call.                               |
@@ -131,7 +132,7 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | --------- | -------------------------------------------------------------------------- |
 | 2         | **Real Intune** via Microsoft Graph (`DeviceManagement.Read.All`, etc.).   |
 | 3         | **Real SCCM/MECM** via WMI / SCCM SDK / approved scripts.                  |
-| 4         | **Hardened local app server deployment** — installer/service + auth + signed distribution. |
+| 4         | **Hardened endpoint diagnostics** — auth, audit, and signed distribution. |
 | 5         | **Real ServiceNow / Jira** ticketing — replace `mock_ticket_adapter`.      |
 
 ### Platform hardening (non-LLM)
@@ -160,9 +161,9 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | Criterion                                                            | Status                                                  |
 | -------------------------------------------------------------------- | ------------------------------------------------------- |
 | Frontend shows multiple workflow options                             | ✅                                                      |
-| Only System Slow workflow is active                                  | ✅                                                      |
+| All registered helpdesk workflows are active                         | ✅                                                      |
 | User can type "My system is slow"                                    | ✅                                                      |
-| Assistant triggers local app diagnostics without asking device name       | ✅                                                   |
+| Assistant triggers backend-local diagnostics without asking device name   | ✅                                                   |
 | Diagnostic router selects method                                     | ✅                                                      |
 | Browser diagnostics work as fallback                                 | ✅                                                      |
 | Diagnostic results are summarized                                    | ✅ (LLM when key set; deterministic fallback otherwise) |

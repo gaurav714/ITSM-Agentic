@@ -8,11 +8,10 @@ export const submitBrowserDiagnostics = async (sessionId, payload) => {
   return data;
 };
 
-export const submitLocalActionResult = async (sessionId, payload) => {
-  const { data } = await api.post("/diagnostics/local-action", {
+export const executeBackendAction = async (sessionId, payload) => {
+  const { data } = await api.post("/diagnostics/action", {
     session_id: sessionId,
     ...payload,
-    raw: payload,
   });
   return data;
 };

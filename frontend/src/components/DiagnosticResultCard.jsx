@@ -21,8 +21,20 @@ export default function DiagnosticResultCard({ data }) {
           label="Disk free"
           value={m.disk_free_gb != null ? `${m.disk_free_gb} GB` : "—"}
         />
-        <Metric label="CPU cores" value={m.cpu_cores ?? "—"} />
+        <Metric
+          label="Physical cores"
+          value={m.physical_cpu_cores ?? m.cpu_cores ?? "-"}
+        />
+        <Metric
+          label="Logical processors"
+          value={m.logical_cpu_processors ?? "-"}
+        />
       </div>
+      {!m.physical_cpu_cores && m.browser_reported_cpu_cores && (
+        <p className="mt-2 text-[11px] text-slate-500">
+          Browser-reported CPU cores: {m.browser_reported_cpu_cores}
+        </p>
+      )}
       {Array.isArray(m.top_processes) && m.top_processes.length > 0 && (
         <div className="mt-3">
           <p className="text-[11px] font-medium text-slate-500 uppercase">
@@ -35,10 +47,12 @@ export default function DiagnosticResultCard({ data }) {
           </ul>
         </div>
       )}
-      {m.local_app_available && (
+      {m.backend_local_available && (
         <div className="mt-3 rounded bg-emerald-50 p-2 text-xs text-emerald-900">
-          <p className="font-medium">Local app server responded</p>
-          {m.local_app_summary && <p className="mt-1">{m.local_app_summary}</p>}
+          <p className="font-medium">Backend-local diagnostics responded</p>
+          {m.backend_local_summary && (
+            <p className="mt-1">{m.backend_local_summary}</p>
+          )}
           {m.diagnostic_recommendation && (
             <p className="mt-1">Recommendation: {m.diagnostic_recommendation}</p>
           )}
@@ -53,9 +67,9 @@ export default function DiagnosticResultCard({ data }) {
           )}
         </div>
       )}
-      {!m.local_app_available && m.local_app_error && (
+      {!m.backend_local_available && m.backend_local_error && (
         <p className="mt-3 rounded bg-slate-50 p-2 text-xs text-slate-500">
-          Local app server: {m.local_app_error}
+          Backend-local diagnostics: {m.backend_local_error}
         </p>
       )}
       {data.summary && (

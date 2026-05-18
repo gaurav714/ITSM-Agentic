@@ -7,6 +7,36 @@ import OnboardingProgressCard from "./OnboardingProgressCard.jsx";
 import LoadingIndicator from "./LoadingIndicator.jsx";
 
 const CARD_RENDERERS = {
+  workflow: ({ data }) => (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-800 shadow-sm">
+      <p className="font-semibold">{data.title || "Workflow"}</p>
+      {data.step && <p className="mt-1 text-xs text-slate-500">Step: {data.step}</p>}
+      {Array.isArray(data.checks) && data.checks.length > 0 && (
+        <ul className="mt-2 list-disc pl-4 text-xs text-slate-600">
+          {data.checks.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      )}
+      {Array.isArray(data.missing) && data.missing.length > 0 && (
+        <p className="mt-2 text-xs text-slate-600">
+          Missing: {data.missing.join(", ")}
+        </p>
+      )}
+      {data.ticket && (
+        <p className="mt-2 text-xs text-slate-600">
+          Ticket {data.ticket.ticket_id}: {data.ticket.status}
+        </p>
+      )}
+    </div>
+  ),
+  confirmation: ({ data }) => (
+    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950 shadow-sm">
+      <p className="font-semibold">{data.title || "Confirmation required"}</p>
+      {data.action && <p className="mt-1 text-xs">Action: {data.action}</p>}
+      {data.scope && <p className="mt-1 text-xs">{data.scope}</p>}
+    </div>
+  ),
   diagnostic_status: DiagnosticStatusCard,
   diagnostic_result: DiagnosticResultCard,
   ticket_draft: TicketDraftCard,

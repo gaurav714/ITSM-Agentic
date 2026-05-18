@@ -5,13 +5,10 @@ import ChatInput from "../components/ChatInput.jsx";
 import { useConversationStore } from "../store/useConversationStore.js";
 import { sendAgentMessage, startWorkflow } from "../api/agentApi.js";
 import {
+  executeBackendAction,
   submitBrowserDiagnostics,
-  submitLocalActionResult,
 } from "../api/diagnosticApi.js";
-import {
-  collectBrowserDiagnostics,
-  executeLocalAppAction,
-} from "../utils/browserDiagnostics.js";
+import { collectBrowserDiagnostics } from "../utils/browserDiagnostics.js";
 
 export default function ConversationPage() {
   const { workflowId } = useParams();
@@ -43,7 +40,7 @@ export default function ConversationPage() {
           sessionId,
           addAssistantResponse,
         );
-        await maybeAutoExecuteLocalAppAction(
+        await maybeAutoExecuteBackendAction(
           resp,
           sessionId,
           addAssistantResponse,
@@ -66,7 +63,7 @@ export default function ConversationPage() {
         sessionId,
         addAssistantResponse,
       );
-      await maybeAutoExecuteLocalAppAction(
+      await maybeAutoExecuteBackendAction(
         resp,
         sessionId,
         addAssistantResponse,
@@ -486,11 +483,11 @@ function getExpectedResponses(workflow) {
     {
       user: "yes / ok / allow",
       state: "awaiting_settings_action",
-      assistant: "I'll ask the local app server to open Windows Update settings now.",
+      assistant: "I'll ask the backend-local tools to open Windows Update settings now.",
       action: "open_windows_update_settings",
     },
     {
-      user: "local app action complete",
+      user: "backend action complete",
       state: "complete",
       assistant:
         "Windows Update settings should be open now. Please review the update error there and try running the update again.",
@@ -528,32 +525,27 @@ async function maybeAutoSubmitBrowserDiagnostics(
   }
 }
 
-async function maybeAutoExecuteLocalAppAction(
+async function maybeAutoExecuteBackendAction(
   resp,
   sessionId,
   addAssistantResponse,
 ) {
-  const actionRequest = resp?.metadata?.trigger_local_app_action;
+  const actionRequest = resp?.metadata?.trigger_backend_action;
   if (!actionRequest?.action) return;
 
   try {
-    const result = await executeLocalAppAction(actionRequest.action, {
-      sessionId,
-      deviceName: actionRequest.device_name,
-      diagnosticId: actionRequest.diagnostic_id,
+    await executeBackendAction(sessionId, {
+      action: actionRequest.action,
+      device_name: actionRequest.device_name,
+      diagnostic_id: actionRequest.diagnostic_id,
     });
-    await submitLocalActionResult(sessionId, result);
-    const next = await sendAgentMessage(sessionId, "local app action complete");
+    const next = await sendAgentMessage(sessionId, "backend action complete");
     addAssistantResponse(next);
   } catch (error) {
-    await submitLocalActionResult(sessionId, {
-      action: actionRequest.action,
-      status: "failed",
-      message: "Unable to contact the local app diagnostic server.",
-      stopped_processes: [],
-      errors: [error?.message || "local_app_unreachable"],
-    });
-    const next = await sendAgentMessage(sessionId, "local app action failed");
+    const next = await sendAgentMessage(
+      sessionId,
+      `backend action failed: ${error?.message || "unknown_error"}`,
+    );
     addAssistantResponse(next);
   }
 }

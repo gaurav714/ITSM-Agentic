@@ -27,6 +27,22 @@ Classify their reply as one of: confirm, cancel, unclear.
 User reply: {message}
 """
 
+TRIAGE_CLASSIFY_PROMPT = """You are classifying a user's reply inside a system slowness troubleshooting workflow.
+The assistant is gathering lightweight context before running local diagnostics.
+
+Classify the reply as exactly one reply_type:
+- partial_update: user reports context such as affected app, when it started, restart status, or a symptom, but does not clearly say the issue is resolved or ready for diagnostics.
+- ready_to_diagnose: user says the issue is still happening, confirms diagnostics, or asks to check/run diagnostics.
+- resolved: user clearly says the system is now fine, fixed, resolved, or no longer slow.
+- unclear: none of the above.
+
+Known fact ids may include: affected_app, all_apps, started_recently, started_today, restarted, closed_apps, high_impact.
+Return a concise acknowledgement summary when useful.
+
+Current workflow state: {session_state}
+User reply: {message}
+"""
+
 TICKET_DRAFT_PROMPT = """You are an IT helpdesk assistant drafting a support ticket for an endpoint performance issue.
 Write a concise, professional ticket from the diagnostic data below.
 
