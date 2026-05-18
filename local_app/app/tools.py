@@ -148,11 +148,19 @@ def open_windows_update_settings() -> Dict[str, Any]:
 
 def _system_profile(context: DiagnosticContext) -> ToolResult:
     browser_metrics = context.browser_metrics or {}
+    logical_cpu_cores = _logical_cpu_count()
+    physical_cpu_cores = _physical_cpu_count()
     result = {
         "hostname": platform.node() or None,
         "os": platform.platform(),
         "machine": platform.machine(),
-        "cpu_cores": os.cpu_count() or browser_metrics.get("cpu_cores"),
+        "physical_cpu_cores": physical_cpu_cores,
+        "logical_cpu_cores": logical_cpu_cores,
+        "browser_hardware_concurrency": browser_metrics.get(
+            "browser_hardware_concurrency"
+        )
+        or browser_metrics.get("cpu_cores"),
+        "cpu_cores": logical_cpu_cores or browser_metrics.get("cpu_cores"),
         "device_memory_gb": browser_metrics.get("device_memory_gb"),
     }
     return ToolResult(
@@ -235,6 +243,18 @@ def _is_edge_process(proc) -> bool:
     except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
         return False
     return name in {"msedge.exe", "microsoftedge.exe", "edge.exe"}
+
+
+def _physical_cpu_count() -> int | None:
+    if psutil is None:
+        return None
+    return psutil.cpu_count(logical=False)
+
+
+def _logical_cpu_count() -> int | None:
+    if psutil is not None:
+        return psutil.cpu_count(logical=True) or os.cpu_count()
+    return os.cpu_count()
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:

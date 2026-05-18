@@ -42,7 +42,12 @@ def normalize_results(method: str, raw: Dict[str, Any]) -> Dict[str, Any]:
         "raw": raw,
     }
     if method == "browser_only":
-        metrics["cpu_cores"] = raw.get("cpu_cores")
+        metrics["browser_hardware_concurrency"] = raw.get(
+            "browser_hardware_concurrency"
+        ) or raw.get("cpu_cores")
+        metrics["physical_cpu_cores"] = raw.get("physical_cpu_cores")
+        metrics["logical_cpu_cores"] = raw.get("logical_cpu_cores")
+        metrics["cpu_cores"] = metrics["logical_cpu_cores"] or raw.get("cpu_cores")
         metrics["device_memory_gb"] = raw.get("device_memory_gb")
         metrics["online"] = raw.get("online")
         metrics["page_load_ms"] = raw.get("page_load_ms")
@@ -62,9 +67,16 @@ def normalize_results(method: str, raw: Dict[str, Any]) -> Dict[str, Any]:
                     "hostname",
                     "os",
                     "machine",
+                    "physical_cpu_cores",
+                    "logical_cpu_cores",
+                    "browser_hardware_concurrency",
+                    "edge_running",
                 ):
                     if metrics.get(key) in (None, []):
                         metrics[key] = local_metrics.get(key)
+                metrics["cpu_cores"] = metrics.get("logical_cpu_cores") or metrics.get(
+                    "cpu_cores"
+                )
             metrics["tool_candidates"] = local_app_response.get("tools", [])
             metrics["remediation_actions"] = local_app_response.get("actions", [])
             metrics["edge_running"] = bool(metrics.get("edge_running")) or any(
@@ -76,4 +88,9 @@ def normalize_results(method: str, raw: Dict[str, Any]) -> Dict[str, Any]:
                 "recommendation"
             )
             metrics["local_app_summary"] = local_app_response.get("summary")
+        if metrics.get("logical_cpu_cores") is None:
+            metrics["logical_cpu_cores"] = metrics.get("cpu_cores")
+        metrics["cpu_cores"] = metrics.get("logical_cpu_cores") or metrics.get(
+            "cpu_cores"
+        )
     return metrics

@@ -20,6 +20,7 @@ export async function collectBrowserDiagnostics(context = {}) {
     user_agent: navigator.userAgent,
     platform: navigator.platform,
     cpu_cores: navigator.hardwareConcurrency || null,
+    browser_hardware_concurrency: navigator.hardwareConcurrency || null,
     device_memory_gb: navigator.deviceMemory || null,
     online: navigator.onLine,
     connection_type: navConn.effectiveType || null,

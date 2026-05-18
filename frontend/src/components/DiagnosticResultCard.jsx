@@ -12,16 +12,20 @@ export default function DiagnosticResultCard({ data }) {
       </div>
       <p className="text-xs text-slate-500">Device: {data.device_name}</p>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <Metric label="CPU" value={m.cpu_pct != null ? `${m.cpu_pct}%` : "—"} />
+        <Metric label="CPU" value={m.cpu_pct != null ? `${m.cpu_pct}%` : "-"} />
         <Metric
           label="Memory"
-          value={m.memory_pct != null ? `${m.memory_pct}%` : "—"}
+          value={m.memory_pct != null ? `${m.memory_pct}%` : "-"}
         />
         <Metric
           label="Disk free"
-          value={m.disk_free_gb != null ? `${m.disk_free_gb} GB` : "—"}
+          value={m.disk_free_gb != null ? `${m.disk_free_gb} GB` : "-"}
         />
-        <Metric label="CPU cores" value={m.cpu_cores ?? "—"} />
+        <Metric label="Physical cores" value={m.physical_cpu_cores ?? "-"} />
+        <Metric
+          label="Logical processors"
+          value={m.logical_cpu_cores ?? m.cpu_cores ?? "-"}
+        />
       </div>
       {Array.isArray(m.top_processes) && m.top_processes.length > 0 && (
         <div className="mt-3">
