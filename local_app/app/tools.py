@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import subprocess
 from typing import Any, Dict, Iterable, List
@@ -146,6 +147,32 @@ def open_windows_update_settings() -> Dict[str, Any]:
             }
 
 
+def collect_windows_update_status() -> Dict[str, Any]:
+    if platform.system().lower() != "windows":
+        return {
+            "status": "unsupported",
+            "message": "Windows Update status collection is only supported on Windows.",
+            "service_statuses": {},
+            "pending_reboot": None,
+            "errors": ["unsupported_os"],
+        }
+
+    service_names = ["wuauserv", "bits", "cryptsvc", "usosvc"]
+    services = {name: _windows_service_status(name) for name in service_names}
+    pending_reboot = _windows_pending_reboot()
+    unavailable = [
+        name for name, data in services.items() if data.get("status") == "unknown"
+    ]
+    status = "partial" if unavailable else "complete"
+    return {
+        "status": status,
+        "message": "Collected Windows Update service status.",
+        "service_statuses": services,
+        "pending_reboot": pending_reboot,
+        "errors": [f"Unable to read service: {name}" for name in unavailable],
+    }
+
+
 def _system_profile(context: DiagnosticContext) -> ToolResult:
     browser_metrics = context.browser_metrics or {}
     logical_cpu_cores = _logical_cpu_count()
@@ -255,6 +282,59 @@ def _logical_cpu_count() -> int | None:
     if psutil is not None:
         return psutil.cpu_count(logical=True) or os.cpu_count()
     return os.cpu_count()
+
+
+def _windows_service_status(service_name: str) -> Dict[str, Any]:
+    if psutil is not None:
+        try:
+            service = psutil.win_service_get(service_name)
+            info = service.as_dict()
+            return {
+                "name": service_name,
+                "display_name": info.get("display_name"),
+                "status": info.get("status"),
+                "start_type": info.get("start_type"),
+            }
+        except Exception as exc:
+            return {"name": service_name, "status": "unknown", "error": str(exc)}
+
+    try:
+        result = subprocess.run(
+            ["sc", "query", service_name],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            shell=False,
+        )
+        output = result.stdout + result.stderr
+        match = re.search(r"STATE\s*:\s*\d+\s+(\w+)", output)
+        return {
+            "name": service_name,
+            "status": (match.group(1).lower() if match else "unknown"),
+            "raw": output.strip()[:500],
+        }
+    except Exception as exc:
+        return {"name": service_name, "status": "unknown", "error": str(exc)}
+
+
+def _windows_pending_reboot() -> bool | None:
+    try:
+        import winreg
+
+        keys = [
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending",
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
+        ]
+        for key in keys:
+            try:
+                handle = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key)
+                winreg.CloseKey(handle)
+                return True
+            except FileNotFoundError:
+                continue
+        return False
+    except Exception:
+        return None
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:

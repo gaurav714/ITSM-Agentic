@@ -45,6 +45,7 @@ export async function executeLocalAppAction(action, context = {}) {
   const toolsByAction = {
     stop_edge: "actions.stop_edge",
     open_windows_update_settings: "actions.open_windows_update_settings",
+    collect_windows_update_status: "actions.collect_windows_update_status",
   };
   const toolName = toolsByAction[action];
 
@@ -58,14 +59,25 @@ export async function executeLocalAppAction(action, context = {}) {
     };
   }
 
-  return callLocalAppTool(toolName, {
-    action,
-    context: {
-      session_id: context.sessionId,
-      device_name: context.deviceName,
-      diagnostic_id: context.diagnosticId,
-    },
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 5000);
+
+  try {
+    return await callLocalAppTool(
+      toolName,
+      {
+        action,
+        context: {
+          session_id: context.sessionId,
+          device_name: context.deviceName,
+          diagnostic_id: context.diagnosticId,
+        },
+      },
+      controller.signal,
+    );
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 async function queryLocalApp(browserMetrics, context) {

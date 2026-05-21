@@ -45,6 +45,8 @@ Current tools:
 
 - `diagnostics.search`
 - `actions.stop_edge`
+- `actions.collect_windows_update_status`
+- `actions.open_windows_update_settings`
 
 The `diagnostics.search` structured tool result includes `summary`,
 `recommendation`, `tools`, `actions`, and `metrics`.
@@ -126,17 +128,70 @@ Structured output includes:
 
 This tool is allowlisted and does not execute arbitrary commands.
 
+### `actions.collect_windows_update_status`
+
+Collects Windows Update related service status and pending reboot state after
+explicit user approval from the helpdesk UI.
+
+Input:
+
+```json
+{
+  "action": "collect_windows_update_status",
+  "context": {
+    "session_id": "browser-session-id",
+    "device_name": "LOCAL-ENDPOINT"
+  }
+}
+```
+
+Structured output includes:
+
+- `action`
+- `status`
+- `message`
+- `service_statuses`
+- `pending_reboot`
+- `errors`
+
+### `actions.open_windows_update_settings`
+
+Opens the Windows Update Settings page after explicit user approval from the
+helpdesk UI.
+
+Input:
+
+```json
+{
+  "action": "open_windows_update_settings",
+  "context": {
+    "session_id": "browser-session-id",
+    "device_name": "LOCAL-ENDPOINT"
+  }
+}
+```
+
+Structured output includes:
+
+- `action`
+- `status`
+- `message`
+- `opened_uri`
+- `errors`
+
 ## Remediation Actions
 
 The app exposes only allowlisted remediation actions as local app tools. At the
-moment, the only action tool is:
+moment, the action tools are:
 
 ```text
 actions.stop_edge
+actions.collect_windows_update_status
+actions.open_windows_update_settings
 ```
 
-It accepts `{"action": "stop_edge"}` and stops Microsoft Edge processes if they
-are running. It does not execute arbitrary commands.
+They accept their matching `action` values and do not execute arbitrary
+commands.
 
 ## Build Windows EXE
 
@@ -226,6 +281,8 @@ Expected tools:
 ```text
 diagnostics.search
 actions.stop_edge
+actions.collect_windows_update_status
+actions.open_windows_update_settings
 ```
 
 You can also run:

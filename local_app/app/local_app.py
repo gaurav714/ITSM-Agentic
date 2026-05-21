@@ -13,7 +13,11 @@ from app.schemas import (
     DiagnosticContext,
     DiagnosticSearchRequest,
 )
-from app.tools import open_windows_update_settings, stop_edge_processes
+from app.tools import (
+    collect_windows_update_status,
+    open_windows_update_settings,
+    stop_edge_processes,
+)
 
 
 class LocalAppRequest(BaseModel):
@@ -109,6 +113,30 @@ def _call_tool(request: LocalAppRequest) -> Dict[str, Any]:
         ).model_dump()
         return _tool_result(request.id, response)
 
+    if name == "actions.collect_windows_update_status":
+        action_request = ActionExecutionRequest(
+            action=str(arguments.get("action") or "collect_windows_update_status"),
+            context=_context_from_arguments(arguments),
+        )
+        if action_request.action != "collect_windows_update_status":
+            response = ActionExecutionResponse(
+                action=action_request.action,
+                status="rejected",
+                message="Only the collect_windows_update_status action is allowlisted here.",
+            ).model_dump()
+            return _tool_result(request.id, response)
+
+        result = collect_windows_update_status()
+        response = ActionExecutionResponse(
+            action="collect_windows_update_status",
+            status=result["status"],
+            message=result["message"],
+            errors=result["errors"],
+            service_statuses=result["service_statuses"],
+            pending_reboot=result["pending_reboot"],
+        ).model_dump()
+        return _tool_result(request.id, response)
+
     return _error(request.id, -32602, f"Unknown local app tool: {name}")
 
 
@@ -186,6 +214,26 @@ def _tool_definitions() -> list[Dict[str, Any]]:
                     "action": {
                         "type": "string",
                         "const": "open_windows_update_settings",
+                    },
+                    "context": {
+                        "type": "object",
+                        "properties": {
+                            "session_id": {"type": "string"},
+                            "device_name": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "name": "actions.collect_windows_update_status",
+            "description": "Read Windows Update related service status and pending reboot state after explicit user approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "const": "collect_windows_update_status",
                     },
                     "context": {
                         "type": "object",

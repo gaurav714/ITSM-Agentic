@@ -1,6 +1,6 @@
 # Project Status — AI Helpdesk Assistant Platform
 
-_Last updated: 2026-05-16_
+_Last updated: 2026-05-20_
 
 ## Overview
 
@@ -22,7 +22,7 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | Workflow registry pattern                                           | ✅     | [workflow_registry.py](backend/app/services/workflow_registry.py)                     |
 | `BaseWorkflow` abstract contract                                    | ✅     | [base.py](backend/app/workflows/base.py)                                              |
 | New Employee Onboarding workflow                                    | ✅     | LangGraph tool-using agent, duplicate check, mock identity DB, RBAC groups, MFA, welcome email |
-| Windows Update Failure workflow                                     | ✅     | LangGraph + LLM-assisted follow-up interpretation, guided fixes first, local access approval gate, local app action to open Windows Update settings |
+| Windows Update Failure workflow                                     | ✅     | Cyclic LangGraph workflow with an LLM decision node, one-check-at-a-time troubleshooting, local access approval gate, and allowlisted Windows Update local tools |
 | In-memory session store                                             | ✅     | [session_store.py](backend/app/memory/session_store.py) — replace with Redis/DB later |
 | Diagnostic router (priority: Intune → SCCM → Browser + local app)   | ✅     | [diagnostic_router.py](backend/app/services/diagnostic_router.py)                     |
 | Mock Intune adapter                                                 | ✅     | `LAPTOP-INTUNE-01`                                                                    |
@@ -32,7 +32,18 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | Conversation agent / message router                                 | ✅     | [conversation_agent.py](backend/app/agents/conversation_agent.py)                     |
 | Browser → local diagnostic app → backend handoff             | ✅     | Browser can call a user-system local app and submit its structured response with diagnostics |
 | Local diagnostic app scaffold                                | ✅     | [local_app](local_app) exposes localhost `/local-app` with `tools/list` and `tools/call` |
-| Local remediation action handoff                                    | ✅     | User can approve the local app server to stop Microsoft Edge before ticket creation    |
+| Local remediation action handoff                                    | ✅     | User can approve allowlisted local app actions such as stopping Edge or collecting Windows Update status |
+
+### Windows Update agentic workflow
+
+The `windows_update_failure` workflow is now a cyclic LangGraph workflow with an LLM decision node on each turn.
+
+- The LLM interprets the raw user message and chooses `ask_check`, `request_access`, `run_tool`, `mark_resolved`, `stop_workflow`, or `clarify`.
+- Session context tracks checks discussed, current check, access approval, tool results, model trace, and model errors.
+- The workflow asks one troubleshooting check at a time and avoids repeating checks already discussed.
+- Local access is requested once; while in `awaiting_access_approval`, clear approval should trigger `collect_windows_update_status` instead of asking permission again.
+- Deterministic guards still enforce local-access approval and the local tool allowlist.
+- Silent deterministic fallback is disabled by default; demo fallback requires `WINDOWS_UPDATE_ALLOW_DETERMINISTIC_FALLBACK=true`.
 
 ### Backend — **Agentic** capabilities (LLM-active when `OPENAI_API_KEY` is set)
 
@@ -44,7 +55,7 @@ A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **
 | LLM-generated diagnostic summary                          | ✅     | `_summarize` in [workflow.py](backend/app/workflows/system_slow/workflow.py)             |
 | LLM-generated ticket draft (title, description, priority) | ✅     | [ticket_service.py](backend/app/services/ticket_service.py)                              |
 | Shared LLM client + structured-output helper              | ✅     | [llm.py](backend/app/services/llm.py)                                                    |
-| Deterministic fallback for every LLM call                 | ✅     | Works without API key                                                                    |
+| Deterministic fallback for most LLM calls                 | ✅     | Windows Update decision fallback is explicit demo mode only                              |
 | Local app telemetry ingestion                             | ✅     | Browser-submitted local app output is normalized, summarized, and used before ticketing |
 
 ### Backend — REST endpoints (all working)

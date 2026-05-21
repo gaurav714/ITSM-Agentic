@@ -420,8 +420,10 @@ function nextActionForState(state, loading) {
   const labels = {
     idle: "Idle",
     awaiting_fix_result: "Guide troubleshooting",
+    awaiting_agent_followup: "Agent troubleshooting",
     awaiting_access_approval: "Request local access",
     awaiting_settings_action: "Open Windows Update settings",
+    awaiting_tool_result: "Run local action",
     awaiting_browser_diagnostics: "Collect diagnostics",
     awaiting_remediation_confirmation: "Confirm remediation",
     awaiting_remediation_action: "Run local action",
@@ -467,15 +469,15 @@ function getExpectedResponses(workflow) {
   return [
     {
       user: "Windows update is failing",
-      state: "awaiting_fix_result",
+      state: "awaiting_agent_followup",
       assistant:
-        "Let's try the common Windows Update fixes first:\n\n1. Confirm you are connected to VPN if your company requires it for updates.\n2. Check that your internet connection is stable.\n3. Restart the device, then try Windows Update again.\n4. Make sure there is enough free disk space for the update.\n\nAfter trying those, tell me whether the update is working or if the issue is still happening.",
+        "First, confirm you are connected to VPN if your company requires VPN for Windows updates. Is VPN connected?",
     },
     {
       user: "I am connected to the VPN",
-      state: "awaiting_fix_result",
+      state: "awaiting_agent_followup",
       assistant:
-        "Thanks, I have noted that VPN is connected. Is Windows Update still failing after checking that?",
+        "Next, check whether your internet connection is stable, then try Windows Update again. Is the connection stable?",
     },
     {
       user: "yes still failing",
@@ -485,15 +487,15 @@ function getExpectedResponses(workflow) {
     },
     {
       user: "yes / ok / allow",
-      state: "awaiting_settings_action",
-      assistant: "I'll ask the local app server to open Windows Update settings now.",
-      action: "open_windows_update_settings",
+      state: "awaiting_tool_result",
+      assistant: "I'll ask the local app server to collect windows update status now.",
+      action: "collect_windows_update_status",
     },
     {
       user: "local app action complete",
-      state: "complete",
+      state: "awaiting_agent_followup",
       assistant:
-        "Windows Update settings should be open now. Please review the update error there and try running the update again.",
+        "Collected Windows Update service status. Please try Windows Update again. If it is still failing, tell me and I can open Windows Update settings next.",
     },
   ];
 }
@@ -533,27 +535,38 @@ async function maybeAutoExecuteLocalAppAction(
   sessionId,
   addAssistantResponse,
 ) {
-  const actionRequest = resp?.metadata?.trigger_local_app_action;
-  if (!actionRequest?.action) return;
+  let current = resp;
+  const seenActions = new Set();
 
-  try {
-    const result = await executeLocalAppAction(actionRequest.action, {
-      sessionId,
-      deviceName: actionRequest.device_name,
-      diagnosticId: actionRequest.diagnostic_id,
-    });
-    await submitLocalActionResult(sessionId, result);
-    const next = await sendAgentMessage(sessionId, "local app action complete");
-    addAssistantResponse(next);
-  } catch (error) {
-    await submitLocalActionResult(sessionId, {
-      action: actionRequest.action,
-      status: "failed",
-      message: "Unable to contact the local app diagnostic server.",
-      stopped_processes: [],
-      errors: [error?.message || "local_app_unreachable"],
-    });
-    const next = await sendAgentMessage(sessionId, "local app action failed");
-    addAssistantResponse(next);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const actionRequest = current?.metadata?.trigger_local_app_action;
+    if (!actionRequest?.action) return;
+
+    const actionKey = `${actionRequest.action}:${actionRequest.device_name || ""}`;
+    if (seenActions.has(actionKey)) return;
+    seenActions.add(actionKey);
+
+    try {
+      const result = await executeLocalAppAction(actionRequest.action, {
+        sessionId,
+        deviceName: actionRequest.device_name,
+        diagnosticId: actionRequest.diagnostic_id,
+      });
+      await submitLocalActionResult(sessionId, result);
+      current = await sendAgentMessage(sessionId, "local app action complete");
+      addAssistantResponse(current);
+    } catch (error) {
+      await submitLocalActionResult(sessionId, {
+        action: actionRequest.action,
+        status: "failed",
+        message: "Unable to contact the local app diagnostic server.",
+        stopped_processes: [],
+        service_statuses: {},
+        pending_reboot: null,
+        errors: [error?.message || "local_app_unreachable"],
+      });
+      current = await sendAgentMessage(sessionId, "local app action failed");
+      addAssistantResponse(current);
+    }
   }
 }

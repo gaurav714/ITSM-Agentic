@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "gpt-5.4-mini"
+    windows_update_allow_deterministic_fallback: bool = False
     allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property

@@ -54,3 +54,5 @@ class ActionExecutionResponse(BaseModel):
     stopped_processes: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
     opened_uri: Optional[str] = None
+    service_statuses: Dict[str, Any] = Field(default_factory=dict)
+    pending_reboot: Optional[bool] = None

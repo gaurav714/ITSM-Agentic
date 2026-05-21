@@ -64,6 +64,9 @@ class LocalActionResultPayload(BaseModel):
     status: str
     message: str
     stopped_processes: List[str] = Field(default_factory=list)
+    service_statuses: Dict[str, Any] = Field(default_factory=dict)
+    pending_reboot: Optional[bool] = None
+    opened_uri: Optional[str] = None
     errors: List[str] = Field(default_factory=list)
     raw: Dict[str, Any] = Field(default_factory=dict)
 

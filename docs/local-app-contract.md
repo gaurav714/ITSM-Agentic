@@ -39,6 +39,8 @@ Current tools:
 
 - `diagnostics.search`
 - `actions.stop_edge`
+- `actions.collect_windows_update_status`
+- `actions.open_windows_update_settings`
 
 ## Diagnostics Request
 
@@ -108,6 +110,9 @@ normalized when present:
       "metrics": {
         "cpu_pct": 42,
         "memory_pct": 91,
+        "physical_cpu_cores": 4,
+        "logical_cpu_cores": 8,
+        "browser_hardware_concurrency": 8,
         "top_processes": ["msedge.exe", "Teams", "Chrome"],
         "edge_running": true
       }
@@ -130,6 +135,8 @@ Current action:
 
 ```text
 actions.stop_edge
+actions.collect_windows_update_status
+actions.open_windows_update_settings
 ```
 
 Request:
@@ -164,3 +171,99 @@ Structured response:
   "errors": []
 }
 ```
+
+## Windows Update Actions
+
+The Windows Update workflow can ask the frontend to trigger one of these
+allowlisted local app actions after explicit user approval:
+
+```text
+collect_windows_update_status
+open_windows_update_settings
+```
+
+The frontend maps those workflow action ids to local app JSON-RPC action tools:
+
+```text
+collect_windows_update_status -> actions.collect_windows_update_status
+open_windows_update_settings -> actions.open_windows_update_settings
+```
+
+### Collect Windows Update Status
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "wu-status-1",
+  "method": "tools/call",
+  "params": {
+    "name": "actions.collect_windows_update_status",
+    "arguments": {
+      "action": "collect_windows_update_status",
+      "context": {
+        "session_id": "browser-session-id",
+        "device_name": "LOCAL-ENDPOINT"
+      }
+    }
+  }
+}
+```
+
+Structured response:
+
+```json
+{
+  "action": "collect_windows_update_status",
+  "status": "complete",
+  "message": "Collected Windows Update service status.",
+  "service_statuses": {
+    "wuauserv": {
+      "name": "wuauserv",
+      "status": "running",
+      "start_type": "manual"
+    }
+  },
+  "pending_reboot": false,
+  "errors": []
+}
+```
+
+### Open Windows Update Settings
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "wu-settings-1",
+  "method": "tools/call",
+  "params": {
+    "name": "actions.open_windows_update_settings",
+    "arguments": {
+      "action": "open_windows_update_settings",
+      "context": {
+        "session_id": "browser-session-id",
+        "device_name": "LOCAL-ENDPOINT"
+      }
+    }
+  }
+}
+```
+
+Structured response:
+
+```json
+{
+  "action": "open_windows_update_settings",
+  "status": "complete",
+  "message": "Opened Windows Update settings.",
+  "opened_uri": "ms-settings:windowsupdate",
+  "errors": []
+}
+```
+
+Local action execution is gated by backend workflow state. The LLM may select an
+allowlisted action, but the workflow will not trigger it until the user has
+explicitly approved local workstation access.

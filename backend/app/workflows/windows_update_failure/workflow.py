@@ -1,8 +1,7 @@
-"""Windows Update Failure workflow.
+"""Agent-owned Windows Update Failure workflow.
 
-This workflow uses LangGraph as the control-flow backbone. Each conversational
-turn builds a small graph state, invokes the graph, then persists the next
-waiting state in the shared session store.
+The LLM agent interprets the raw user message and chooses the next workflow
+action. Deterministic code only enforces safety gates and optional demo fallback.
 """
 
 from __future__ import annotations
@@ -11,105 +10,89 @@ import re
 from typing import Any, Dict, Literal, TypedDict
 
 from langgraph.graph import END, StateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from app.config import get_settings
 from app.models.schemas import AgentMessageResponse, UICard
-from app.services.llm import llm_structured
 from app.workflows.base import BaseWorkflow
+from app.workflows.windows_update_failure.agent import run_windows_update_decision_agent
 
-_AFFIRMATIVE = {
-    "yes",
-    "y",
-    "ok",
-    "okay",
-    "sure",
-    "allow",
-    "approve",
-    "go ahead",
-    "do it",
-    "please do",
+_WINDOWS_UPDATE_TOOL_ALLOWLIST = {
+    "collect_windows_update_status": {
+        "label": "Collect Windows Update status",
+        "scope": "Read Windows Update service status and pending reboot state",
+    },
+    "open_windows_update_settings": {
+        "label": "Open Windows Update settings",
+        "scope": "Open Windows Update settings only",
+    },
 }
-_NEGATIVE = {"no", "n", "cancel", "stop", "not now", "deny", "do not"}
-_STILL_BROKEN = {
-    "still",
-    "same",
-    "not fixed",
-    "did not work",
-    "doesn't work",
-    "failed",
-    "issue persists",
-    "not working",
-    "yes",
-    "y",
+_CHECKS = {
+    "vpn_connected": {
+        "label": "VPN connected if required",
+        "prompt": "Please confirm whether you are connected to VPN if your company requires VPN for Windows updates.",
+    },
+    "internet_ok": {
+        "label": "Internet connection stable",
+        "prompt": "Please check whether your internet connection is stable, then try Windows Update again.",
+    },
+    "restarted": {
+        "label": "Device restarted",
+        "prompt": "Please restart the device, then try Windows Update again.",
+    },
+    "disk_space_checked": {
+        "label": "Disk space checked",
+        "prompt": "Please check that there is enough free disk space for the update.",
+    },
 }
-_FIXED = {"fixed", "resolved", "working now", "it works", "done", "no"}
-_FACT_PATTERNS = {
-    "vpn_connected": (
-        r"\b(vpn).*\b(connect(ed)?|on|working|ok|okay)\b|\b(connect(ed)?|on).*\b(vpn)\b",
-        "VPN is connected",
-    ),
-    "internet_ok": (
-        r"\b(internet|network|wifi|wi-fi|connection).*\b(ok|okay|stable|working|connected)\b|\b(connect(ed)?|stable).*\b(internet|network|wifi|wi-fi)\b",
-        "internet connection is stable",
-    ),
-    "restarted": (
-        r"\b(restart(ed)?|reboot(ed)?)\b",
-        "device was restarted",
-    ),
-    "disk_space_checked": (
-        r"\b(disk|space|storage).*\b(ok|okay|enough|available|free|checked)\b",
-        "disk space was checked",
-    ),
-}
-
-_FOLLOWUP_PROMPT = """You are classifying a user's reply inside a Windows Update failure troubleshooting workflow.
-The assistant has already suggested user-side checks before asking for local system access.
-
-Classify the reply as exactly one reply_type:
-- partial_update: user reports a troubleshooting check or fact, but does not clearly say Windows Update is still failing or resolved.
-- still_failing: user clearly says Windows Update is still failing, failed again, or the issue persists.
-- resolved: user clearly says Windows Update is fixed or working now.
-- approve_access: user explicitly allows local agent/system access.
-- deny_access: user refuses local agent/system access.
-- unclear: none of the above.
-
-Known fact ids may include: vpn_connected, internet_ok, restarted, disk_space_checked.
-Return a concise acknowledgement summary when useful.
-
-Current workflow state: {session_state}
-User reply: {message}
-"""
+_CHECK_ORDER = ["vpn_connected", "internet_ok", "restarted", "disk_space_checked"]
 
 
 class WindowsUpdateState(TypedDict, total=False):
     session_state: str
     user_message: str
-    decision: Literal[
-        "start",
-        "partial_update",
+    conversation_summary: str
+    checks_discussed: list[str]
+    current_check: str
+    access_approved: bool
+    tool_results: list[dict]
+    local_action_received: bool
+    pending_tool: str
+    next_decision: Literal[
+        "ask_check",
+        "request_access",
+        "run_tool",
         "resolved",
-        "still_broken",
-        "approve_access",
-        "deny_access",
-        "action_complete",
-        "unclear",
+        "deny_or_cancel",
+        "clarify",
+        "agent_error",
     ]
-    known_facts: list[str]
-    summary: str
+    selected_check: str
+    selected_tool: str
+    assistant_message: str
+    rationale: str
+    agentic: bool
+    llm_called: bool
+    agent_trace: list[dict]
+    agent_summary: str
+    agent_error: str
     response: AgentMessageResponse
 
 
-class _FollowupClassification(BaseModel):
-    reply_type: Literal[
-        "partial_update",
-        "still_failing",
+class _AgentDecision(BaseModel):
+    decision: Literal[
+        "ask_check",
+        "request_access",
+        "run_tool",
         "resolved",
-        "approve_access",
-        "deny_access",
-        "unclear",
+        "deny_or_cancel",
+        "clarify",
+        "agent_error",
     ]
-    known_facts: list[str] = Field(default_factory=list)
-    summary: str = ""
+    selected_check: str = ""
+    selected_tool: str = ""
+    message: str = ""
+    rationale: str = ""
 
 
 class WindowsUpdateFailureWorkflow(BaseWorkflow):
@@ -122,333 +105,675 @@ class WindowsUpdateFailureWorkflow(BaseWorkflow):
 
     def _build_graph(self):
         graph = StateGraph(WindowsUpdateState)
-        graph.add_node("classify_turn", self._classify_turn)
-        graph.add_node("suggest_user_fixes", self._suggest_user_fixes)
-        graph.add_node("summarize_progress", self._summarize_progress)
+        graph.add_node("agent_interpret_and_decide", self._agent_interpret_and_decide)
+        graph.add_node("prompt_user_check", self._prompt_user_check)
         graph.add_node("request_local_access", self._request_local_access)
-        graph.add_node("trigger_settings_action", self._trigger_settings_action)
-        graph.add_node("finish", self._finish)
-        graph.add_node("clarify", self._clarify)
+        graph.add_node("trigger_local_tool", self._trigger_local_tool)
+        graph.add_node("finish_or_clarify", self._finish_or_clarify)
 
-        graph.set_entry_point("classify_turn")
+        graph.set_entry_point("agent_interpret_and_decide")
         graph.add_conditional_edges(
-            "classify_turn",
-            self._route,
+            "agent_interpret_and_decide",
+            self._route_decision,
             {
-                "suggest_user_fixes": "suggest_user_fixes",
-                "summarize_progress": "summarize_progress",
+                "prompt_user_check": "prompt_user_check",
                 "request_local_access": "request_local_access",
-                "trigger_settings_action": "trigger_settings_action",
-                "finish": "finish",
-                "clarify": "clarify",
+                "trigger_local_tool": "trigger_local_tool",
+                "finish_or_clarify": "finish_or_clarify",
             },
         )
-        graph.add_edge("suggest_user_fixes", END)
-        graph.add_edge("summarize_progress", END)
+        graph.add_edge("prompt_user_check", END)
         graph.add_edge("request_local_access", END)
-        graph.add_edge("trigger_settings_action", END)
-        graph.add_edge("finish", END)
-        graph.add_edge("clarify", END)
+        graph.add_edge("trigger_local_tool", END)
+        graph.add_edge("finish_or_clarify", END)
         return graph.compile()
 
     def handle(
         self, session: Dict[str, Any], user_message: str
     ) -> AgentMessageResponse:
         if session.get("workflow") != self.workflow_id:
-            session["workflow"] = self.workflow_id
-            session["state"] = "idle"
-            session["windows_update_facts"] = []
-            session.pop("local_action_result", None)
+            self._start_session(session)
+
+        if session.get("state") == "complete":
+            self._start_session(session)
+
+        local_action_result = session.pop("local_action_result", None)
+        if local_action_result:
+            session.setdefault("windows_update_tool_results", []).append(
+                local_action_result
+            )
+            session["windows_update_pending_tool"] = ""
 
         graph_state = self._graph.invoke(
             {
                 "session_state": session.get("state", "idle"),
                 "user_message": user_message or "",
-                "known_facts": session.get("windows_update_facts") or [],
+                "conversation_summary": _conversation_summary(session),
+                "checks_discussed": session.get("windows_update_checks_discussed")
+                or [],
+                "current_check": session.get("windows_update_current_check") or "",
+                "access_approved": bool(
+                    session.get("windows_update_access_approved")
+                ),
+                "tool_results": session.get("windows_update_tool_results") or [],
+                "local_action_received": bool(local_action_result),
+                "pending_tool": session.get("windows_update_pending_tool") or "",
             }
         )
-        session["windows_update_facts"] = _merge_facts(
-            session.get("windows_update_facts") or [],
-            graph_state.get("known_facts") or [],
+
+        if graph_state.get("next_decision") == "ask_check":
+            check_id = graph_state.get("selected_check", "")
+            session["windows_update_current_check"] = check_id
+            session["windows_update_checks_discussed"] = _merge_checks(
+                session.get("windows_update_checks_discussed") or [],
+                [check_id],
+            )
+        else:
+            session["windows_update_current_check"] = ""
+
+        session["windows_update_last_decision"] = {
+            "decision": graph_state.get("next_decision"),
+            "selected_check": graph_state.get("selected_check", ""),
+            "selected_tool": graph_state.get("selected_tool", ""),
+            "message": graph_state.get("assistant_message", ""),
+            "rationale": graph_state.get("rationale", ""),
+            "agentic": bool(graph_state.get("agentic")),
+            "llm_called": bool(graph_state.get("llm_called")),
+            "agent_summary": graph_state.get("agent_summary", ""),
+            "agent_error": graph_state.get("agent_error", ""),
+        }
+        session["windows_update_llm_called"] = bool(graph_state.get("llm_called"))
+        session["windows_update_agent_error"] = graph_state.get("agent_error", "")
+        trace = session.setdefault("windows_update_agent_trace", [])
+        agent_trace = graph_state.get("agent_trace") or []
+        if agent_trace:
+            trace.extend(agent_trace)
+        else:
+            trace.append(session["windows_update_last_decision"])
+        session["windows_update_access_approved"] = bool(
+            graph_state.get("access_approved")
         )
+
         response = graph_state["response"]
         session["state"] = response.state
+        if graph_state.get("next_decision") == "run_tool":
+            session["windows_update_pending_tool"] = graph_state.get(
+                "selected_tool", ""
+            )
+        elif response.state != "awaiting_tool_result":
+            session["windows_update_pending_tool"] = ""
         return response
 
-    def _classify_turn(self, state: WindowsUpdateState) -> WindowsUpdateState:
-        session_state = state.get("session_state") or "idle"
-        lower = (state.get("user_message") or "").strip().lower()
+    def _start_session(self, session: Dict[str, Any]) -> None:
+        session["workflow"] = self.workflow_id
+        session["state"] = "idle"
+        session["windows_update_checks_discussed"] = []
+        session["windows_update_agent_trace"] = []
+        session["windows_update_last_decision"] = None
+        session["windows_update_access_approved"] = False
+        session["windows_update_tool_results"] = []
+        session["windows_update_current_check"] = ""
+        session["windows_update_pending_tool"] = ""
+        session.pop("local_action_result", None)
 
-        if session_state in ("idle", None):
-            return {**state, "decision": "start"}
-        if session_state == "awaiting_fix_result":
-            classification = _classify_followup(session_state, lower)
-            decision = (
-                "still_broken"
-                if classification.reply_type == "still_failing"
-                else classification.reply_type
-            )
-            return {
-                **state,
-                "decision": decision,
-                "known_facts": _merge_facts(
-                    state.get("known_facts") or [],
-                    classification.known_facts,
-                ),
-                "summary": classification.summary,
-            }
-        if session_state == "awaiting_access_approval":
-            classification = _classify_followup(session_state, lower)
-            if classification.reply_type in ("approve_access", "deny_access"):
-                return {**state, "decision": classification.reply_type}
-            return {**state, "decision": "unclear"}
-        if session_state == "awaiting_settings_action":
-            return {**state, "decision": "action_complete"}
-        return {**state, "decision": "start"}
+    def _agent_interpret_and_decide(
+        self, state: WindowsUpdateState
+    ) -> WindowsUpdateState:
+        decision_result = _decide_next_step(state)
+        decision = decision_result["decision"]
+        access_approved = bool(state.get("access_approved"))
+        if decision.decision == "run_tool":
+            access_approved = True
+        if decision.decision == "request_access":
+            access_approved = False
+        return {
+            **state,
+            "next_decision": decision.decision,
+            "selected_check": decision.selected_check,
+            "selected_tool": decision.selected_tool,
+            "assistant_message": decision.message,
+            "rationale": decision.rationale,
+            "agentic": decision_result["agentic"],
+            "llm_called": decision_result.get("llm_called", False),
+            "agent_trace": decision_result["trace"],
+            "agent_summary": decision_result.get("summary", ""),
+            "agent_error": decision_result.get("agent_error", ""),
+            "access_approved": access_approved,
+        }
 
     @staticmethod
-    def _route(state: WindowsUpdateState) -> str:
-        decision = state.get("decision")
-        if decision == "start":
-            return "suggest_user_fixes"
-        if decision == "partial_update":
-            return "summarize_progress"
-        if decision == "still_broken":
+    def _route_decision(state: WindowsUpdateState) -> str:
+        decision = state.get("next_decision")
+        if decision == "ask_check":
+            return "prompt_user_check"
+        if decision == "request_access":
             return "request_local_access"
-        if decision == "approve_access":
-            return "trigger_settings_action"
-        if decision in ("resolved", "deny_access", "action_complete"):
-            return "finish"
-        return "clarify"
+        if decision == "run_tool":
+            return "trigger_local_tool"
+        return "finish_or_clarify"
 
-    def _suggest_user_fixes(self, state: WindowsUpdateState) -> WindowsUpdateState:
-        response = AgentMessageResponse(
-            message=(
-                "Let's try the common Windows Update fixes first:\n\n"
-                "1. Confirm you are connected to VPN if your company requires it for updates.\n"
-                "2. Check that your internet connection is stable.\n"
-                "3. Restart the device, then try Windows Update again.\n"
-                "4. Make sure there is enough free disk space for the update.\n\n"
-                "After trying those, tell me whether the update is working or if the issue is still happening."
-            ),
-            workflow=self.workflow_id,
-            state="awaiting_fix_result",
-            cards=[
-                UICard(
-                    kind="workflow",
-                    data={
-                        "title": self.title,
-                        "step": "suggest_user_fixes",
-                        "checks": [
-                            "VPN connected if required",
-                            "Internet connection stable",
-                            "Device restarted",
-                            "Disk space available",
-                        ],
-                    },
-                )
-            ],
+    def _prompt_user_check(self, state: WindowsUpdateState) -> WindowsUpdateState:
+        selected_check = _valid_or_next_check(
+            state.get("selected_check"),
+            state.get("checks_discussed") or [],
         )
-        return {**state, "response": response}
-
-    def _summarize_progress(self, state: WindowsUpdateState) -> WindowsUpdateState:
-        facts = state.get("known_facts") or []
-        summary = (state.get("summary") or "").strip()
-        if not summary:
-            summary = _facts_summary(facts) or "I have noted that update."
-
+        check = _CHECKS[selected_check]
+        message = state.get("assistant_message") or check["prompt"]
         response = AgentMessageResponse(
-            message=f"Thanks, I have noted that {summary}. Is Windows Update still failing after checking that?",
+            message=message,
             workflow=self.workflow_id,
-            state="awaiting_fix_result",
-            cards=[
-                UICard(
-                    kind="workflow",
-                    data={
-                        "title": self.title,
-                        "step": "summarize_progress",
-                        "known_facts": facts,
-                    },
-                )
-            ],
+            state="awaiting_agent_followup",
+            cards=[self._decision_card(state, "agent_selected_check")],
         )
-        return {**state, "response": response}
+        return {**state, "selected_check": selected_check, "response": response}
 
     def _request_local_access(self, state: WindowsUpdateState) -> WindowsUpdateState:
         response = AgentMessageResponse(
             message=(
-                "Thanks for checking. The next step needs local workstation access. "
-                "Allow agent to access this device and open Windows Update settings?"
+                state.get("assistant_message")
+                or "Allow the agent to run allowlisted Windows Update tools on this device?"
             ),
             workflow=self.workflow_id,
             state="awaiting_access_approval",
-            cards=[
-                UICard(
-                    kind="confirmation",
-                    data={
-                        "title": "Allow local agent access?",
-                        "action": "open_windows_update_settings",
-                        "scope": "Open Windows Update settings only",
-                    },
-                )
-            ],
+            cards=[self._decision_card(state, "agent_requested_access")],
         )
         return {**state, "response": response}
 
-    def _trigger_settings_action(self, state: WindowsUpdateState) -> WindowsUpdateState:
+    def _trigger_local_tool(self, state: WindowsUpdateState) -> WindowsUpdateState:
+        selected_tool = state.get("selected_tool") or "open_windows_update_settings"
+        if selected_tool not in _WINDOWS_UPDATE_TOOL_ALLOWLIST:
+            return _agent_error_state(
+                state,
+                f"Agent selected a non-allowlisted tool: {selected_tool}",
+            )
+        tool = _WINDOWS_UPDATE_TOOL_ALLOWLIST[selected_tool]
         response = AgentMessageResponse(
-            message="I'll ask the local app server to open Windows Update settings now.",
+            message=f"I'll ask the local app server to {tool['label'].lower()} now.",
             workflow=self.workflow_id,
-            state="awaiting_settings_action",
+            state="awaiting_tool_result",
             metadata={
                 "trigger_local_app_action": {
-                    "action": "open_windows_update_settings",
+                    "action": selected_tool,
                     "device_name": "LOCAL-ENDPOINT",
                 }
             },
+            cards=[self._decision_card(state, "agent_selected_tool")],
             requires_input=False,
         )
-        return {**state, "response": response}
+        return {**state, "selected_tool": selected_tool, "response": response}
 
-    def _finish(self, state: WindowsUpdateState) -> WindowsUpdateState:
-        decision = state.get("decision")
-        if decision == "resolved":
-            message = "Great, Windows Update is working now. I'll close this workflow."
-        elif decision == "deny_access":
-            message = "No problem. I will not access the device. You can restart this workflow if you want to try again later."
-        else:
-            message = (
-                "Windows Update settings should be open now. Please review the update error there "
-                "and try running the update again."
+    def _finish_or_clarify(self, state: WindowsUpdateState) -> WindowsUpdateState:
+        decision = state.get("next_decision")
+        if decision == "agent_error":
+            return _agent_error_state(
+                state, state.get("agent_error") or "Unknown LLM decision error."
             )
+
+        if decision == "resolved":
+            response = AgentMessageResponse(
+                message=(
+                    state.get("assistant_message")
+                    or "Great, Windows Update is working now. I'll close this workflow."
+                ),
+                workflow=self.workflow_id,
+                state="complete",
+                requires_input=False,
+                cards=[self._decision_card(state, "agent_marked_resolved")],
+            )
+            return {**state, "response": response}
+
+        if decision == "deny_or_cancel":
+            response = AgentMessageResponse(
+                message=(
+                    state.get("assistant_message")
+                    or "No problem. I will not access the device. You can restart this workflow if you want to try again later."
+                ),
+                workflow=self.workflow_id,
+                state="complete",
+                requires_input=False,
+                cards=[self._decision_card(state, "agent_stopped_workflow")],
+            )
+            return {**state, "response": response}
+
         response = AgentMessageResponse(
-            message=message,
+            message=(
+                state.get("assistant_message")
+                or "Could you clarify whether Windows Update is working now or still failing?"
+            ),
             workflow=self.workflow_id,
-            state="complete",
-            requires_input=False,
+            state="awaiting_agent_followup",
+            cards=[self._decision_card(state, "agent_clarified")],
         )
         return {**state, "response": response}
 
-    def _clarify(self, state: WindowsUpdateState) -> WindowsUpdateState:
-        session_state = state.get("session_state")
-        if session_state == "awaiting_access_approval":
-            message = "Please reply 'yes' to allow opening Windows Update settings, or 'no' to stop."
-            next_state = "awaiting_access_approval"
-        else:
-            message = "Is Windows Update working now, or is the issue still happening?"
-            next_state = "awaiting_fix_result"
-        response = AgentMessageResponse(
-            message=message,
-            workflow=self.workflow_id,
-            state=next_state,
+    def _decision_card(self, state: WindowsUpdateState, step: str) -> UICard:
+        return UICard(
+            kind="workflow",
+            data={
+                "title": self.title,
+                "step": step,
+                "decision": state.get("next_decision"),
+                "selected_check": state.get("selected_check", ""),
+                "selected_tool": state.get("selected_tool", ""),
+                "message": state.get("assistant_message", ""),
+                "rationale": state.get("rationale", ""),
+                "checks_discussed": state.get("checks_discussed") or [],
+                "current_check": state.get("current_check", ""),
+                "access_approved": bool(state.get("access_approved")),
+                "pending_tool": state.get("pending_tool", ""),
+                "available_tools": list(_WINDOWS_UPDATE_TOOL_ALLOWLIST),
+                "agentic": bool(state.get("agentic")),
+                "llm_called": bool(state.get("llm_called")),
+                "agent_trace": state.get("agent_trace") or [],
+                "agent_error": state.get("agent_error", ""),
+            },
         )
-        return {**state, "response": response}
 
 
-def _has_phrase(text: str, phrases: set[str]) -> bool:
-    if not text:
-        return False
-    for phrase in phrases:
-        if phrase == text:
-            return True
-        if len(phrase) <= 3:
-            if re.search(rf"\b{re.escape(phrase)}\b", text):
-                return True
-            continue
-        if phrase in text:
-            return True
-    return False
+def _decide_next_step(state: WindowsUpdateState) -> Dict[str, Any]:
+    checks_discussed = state.get("checks_discussed") or []
+    session_state = state.get("session_state") or "idle"
+    protocol_decision = _protocol_decision(state)
+    if protocol_decision:
+        return {
+            "decision": protocol_decision,
+            "agentic": False,
+            "llm_called": False,
+            "trace": [
+                {
+                    "decision": protocol_decision.decision,
+                    "selected_check": protocol_decision.selected_check,
+                    "selected_tool": protocol_decision.selected_tool,
+                    "message": protocol_decision.message,
+                    "rationale": protocol_decision.rationale,
+                    "source": "deterministic_protocol_gate",
+                }
+            ],
+            "summary": "",
+            "agent_error": "",
+        }
+
+    context = {
+        "session_state": session_state,
+        "latest_user_message": state.get("user_message") or "",
+        "conversation_summary": state.get("conversation_summary") or "",
+        "checks_discussed": checks_discussed,
+        "missing_checks": _missing_checks(checks_discussed),
+        "current_prompted_check": state.get("current_check") or "",
+        "access_approved": bool(state.get("access_approved")),
+        "awaiting_local_access_approval": session_state == "awaiting_access_approval",
+        "access_request_already_sent": session_state == "awaiting_access_approval",
+        "recommended_first_tool": "collect_windows_update_status",
+        "checks_discussed_count": len(checks_discussed),
+        "previous_local_tool_results": state.get("tool_results") or [],
+        "available_checks": {
+            check_id: check["label"] for check_id, check in _CHECKS.items()
+        },
+        "allowlisted_tools": list(_WINDOWS_UPDATE_TOOL_ALLOWLIST.keys()),
+    }
+    agent_result = run_windows_update_decision_agent(context)
+    if agent_result and agent_result.get("decision"):
+        decision = _AgentDecision.model_validate(agent_result["decision"])
+        return {
+            "decision": _sanitize_decision(decision, state),
+            "agentic": bool(agent_result.get("agentic")),
+            "llm_called": bool(agent_result.get("llm_called")),
+            "trace": agent_result.get("trace") or [],
+            "summary": agent_result.get("summary", ""),
+            "agent_error": agent_result.get("agent_error", ""),
+        }
+
+    if get_settings().windows_update_allow_deterministic_fallback:
+        fallback = _fallback_decision(state)
+        return {
+            "decision": fallback,
+            "agentic": False,
+            "llm_called": bool((agent_result or {}).get("llm_called")),
+            "trace": [
+                {
+                    "decision": fallback.decision,
+                    "selected_check": fallback.selected_check,
+                    "selected_tool": fallback.selected_tool,
+                    "message": fallback.message,
+                    "rationale": fallback.rationale,
+                    "source": "deterministic_fallback",
+                    "agent_error": (agent_result or {}).get("agent_error", ""),
+                }
+            ],
+            "summary": "",
+            "agent_error": (agent_result or {}).get("agent_error", "")
+            if agent_result
+            else "",
+        }
+
+    error = (agent_result or {}).get("agent_error", "") or "llm_decision_unavailable"
+    return {
+        "decision": _AgentDecision(
+            decision="agent_error",
+            message="",
+            rationale="The workflow requires an LLM decision and fallback is disabled.",
+        ),
+        "agentic": False,
+        "llm_called": bool((agent_result or {}).get("llm_called")),
+        "trace": agent_result.get("trace") if agent_result else [],
+        "summary": (agent_result or {}).get("summary", ""),
+        "agent_error": error,
+    }
 
 
-def _classify_followup(
-    session_state: str, message: str
-) -> _FollowupClassification:
-    llm_result = llm_structured(
-        _FOLLOWUP_PROMPT.format(session_state=session_state, message=message),
-        _FollowupClassification,
+def _protocol_decision(state: WindowsUpdateState) -> _AgentDecision | None:
+    session_state = state.get("session_state") or "idle"
+    message = state.get("user_message") or ""
+    latest_tool = _latest_tool_result(state.get("tool_results") or [])
+
+    if state.get("local_action_received"):
+        return _AgentDecision(
+            decision="clarify",
+            message=_local_tool_result_message(latest_tool),
+            rationale="Summarized the local app action result received from the browser.",
+        )
+
+    if session_state == "awaiting_tool_result":
+        pending_tool = state.get("pending_tool") or "the requested local tool"
+        return _AgentDecision(
+            decision="clarify",
+            message=(
+                f"I already sent the {pending_tool} request to the local app. "
+                "I am waiting for the browser to return the result. If nothing happens, "
+                "make sure the local diagnostic app is running at http://127.0.0.1:8765."
+            ),
+            rationale="Prevented re-triggering the same pending local app action.",
+        )
+
+    if session_state != "awaiting_access_approval":
+        return None
+
+    if _is_clear_approval(message):
+        return _AgentDecision(
+            decision="run_tool",
+            selected_tool="collect_windows_update_status",
+            rationale="User explicitly approved local Windows Update diagnostics.",
+        )
+
+    if _is_clear_denial(message):
+        return _AgentDecision(
+            decision="deny_or_cancel",
+            message=(
+                "No problem. I will not access this device. You can restart the "
+                "Windows Update workflow later if you want to run local diagnostics."
+            ),
+            rationale="User denied or cancelled local workstation access.",
+        )
+
+    return _AgentDecision(
+        decision="clarify",
+        message=(
+            "Please reply yes to approve the local Windows Update diagnostic check, "
+            "or no to stop."
+        ),
+        rationale="Access approval reply was ambiguous.",
     )
-    if llm_result is not None:
-        return _normalize_classification(llm_result, session_state, message)
-    return _fallback_classify_followup(session_state, message)
 
 
-def _normalize_classification(
-    result: _FollowupClassification, session_state: str, message: str
-) -> _FollowupClassification:
-    fallback = _fallback_classify_followup(session_state, message)
-    facts = _merge_facts(result.known_facts, fallback.known_facts)
+def _sanitize_decision(
+    decision: _AgentDecision, state: WindowsUpdateState
+) -> _AgentDecision:
+    selected_check = decision.selected_check
+    selected_tool = decision.selected_tool
+    session_state = state.get("session_state")
+    checks_discussed = state.get("checks_discussed") or []
 
-    # Guardrail: do not let generic approvals during the fix stage skip guidance.
-    reply_type = result.reply_type
-    if session_state == "awaiting_fix_result" and reply_type == "approve_access":
-        reply_type = fallback.reply_type
-    if session_state == "awaiting_access_approval" and reply_type not in (
-        "approve_access",
-        "deny_access",
+    if (
+        decision.decision == "run_tool"
+        and not state.get("access_approved")
+        and session_state != "awaiting_access_approval"
     ):
-        reply_type = fallback.reply_type
+        return _AgentDecision(
+            decision="request_access",
+            message=(
+                "I can check the workstation with allowlisted Windows Update tools. "
+                "Do I have your permission to run those local checks?"
+            ),
+            rationale="Local tools require explicit access approval first.",
+        )
+    if decision.decision == "request_access" and session_state == "awaiting_access_approval":
+        return _AgentDecision(
+            decision="clarify",
+            message=(
+                "I already asked for local workstation access. Please reply yes "
+                "to approve running the local Windows Update check, or no to stop."
+            ),
+            rationale=(
+                "Prevented repeated access request while waiting for the user's "
+                "approval answer."
+            ),
+        )
+    if decision.decision == "run_tool" and selected_tool not in _WINDOWS_UPDATE_TOOL_ALLOWLIST:
+        return _AgentDecision(
+            decision="agent_error",
+            message="",
+            rationale=f"Agent selected non-allowlisted tool: {selected_tool}",
+        )
+    if decision.decision == "ask_check" and (
+        selected_check not in _CHECKS or selected_check in checks_discussed
+    ):
+        selected_check = _next_missing_check(checks_discussed)
+        if not selected_check:
+            return _AgentDecision(
+                decision="request_access",
+                message=(
+                    "We have covered the basic checks. Do I have your permission "
+                    "to run an allowlisted local Windows Update check on this device?"
+                ),
+                rationale=(
+                    "Agent selected a duplicate or unknown check and no known "
+                    "check remains, so the next safe step is local access."
+                ),
+            )
 
-    summary = result.summary.strip() or fallback.summary
-    return _FollowupClassification(
-        reply_type=reply_type,
-        known_facts=facts,
-        summary=summary,
+    return _AgentDecision(
+        decision=decision.decision,
+        selected_check=selected_check,
+        selected_tool=selected_tool,
+        message=decision.message,
+        rationale=decision.rationale,
     )
 
 
-def _fallback_classify_followup(
-    session_state: str, message: str
-) -> _FollowupClassification:
-    facts = _extract_known_facts(message)
+def _agent_error_state(state: WindowsUpdateState, error: str) -> WindowsUpdateState:
+    response = AgentMessageResponse(
+        message=(
+            "I cannot continue the Windows Update agentic workflow because "
+            "the LLM decision step failed. Please check OPENAI_API_KEY and "
+            "OPENAI_MODEL, then restart this workflow."
+        ),
+        workflow=WindowsUpdateFailureWorkflow.workflow_id,
+        state="awaiting_agent_error",
+        cards=[
+            UICard(
+                kind="workflow",
+                data={
+                    "title": WindowsUpdateFailureWorkflow.title,
+                    "step": "agent_decision_error",
+                    "agentic": False,
+                    "llm_called": bool(state.get("llm_called")),
+                    "agent_error": error,
+                    "agent_trace": state.get("agent_trace") or [],
+                },
+            )
+        ],
+        requires_input=False,
+        metadata={
+            "agentic": False,
+            "llm_called": bool(state.get("llm_called")),
+            "agent_error": error,
+        },
+    )
+    return {**state, "next_decision": "agent_error", "agent_error": error, "response": response}
 
-    if session_state == "awaiting_access_approval":
-        if _has_phrase(message, _AFFIRMATIVE):
-            return _FollowupClassification(reply_type="approve_access")
-        if _has_phrase(message, _NEGATIVE):
-            return _FollowupClassification(reply_type="deny_access")
-        return _FollowupClassification(reply_type="unclear")
 
-    if _has_phrase(message, _STILL_BROKEN):
-        return _FollowupClassification(
-            reply_type="still_failing",
-            known_facts=facts,
-            summary=_facts_summary(facts),
+def _fallback_decision(state: WindowsUpdateState) -> _AgentDecision:
+    checks_discussed = state.get("checks_discussed") or []
+    access_approved = bool(state.get("access_approved"))
+    latest_tool = _latest_tool_result(state.get("tool_results") or [])
+    if state.get("session_state") == "awaiting_access_approval":
+        return _AgentDecision(
+            decision="run_tool",
+            selected_tool="collect_windows_update_status",
+            message="",
+            rationale="Demo fallback assumes access was approved.",
         )
-    if facts:
-        return _FollowupClassification(
-            reply_type="partial_update",
-            known_facts=facts,
-            summary=_facts_summary(facts),
+    if state.get("session_state") == "awaiting_tool_result":
+        return _AgentDecision(
+            decision="clarify",
+            message=_local_tool_result_message(latest_tool)
+            if latest_tool
+            else "I am waiting for the local Windows Update diagnostic result.",
+            rationale="Demo fallback does not re-run a pending local action.",
         )
-    if _has_phrase(message, _FIXED):
-        return _FollowupClassification(reply_type="resolved")
-    return _FollowupClassification(reply_type="unclear")
+    if len(checks_discussed) < 2:
+        check_id = _next_missing_check(checks_discussed)
+        return _AgentDecision(
+            decision="ask_check",
+            selected_check=check_id,
+            message=_CHECKS[check_id]["prompt"],
+            rationale="Demo fallback asks basic checks before access.",
+        )
+    if access_approved:
+        return _AgentDecision(
+            decision="run_tool",
+            selected_tool=_fallback_tool_for_state(state),
+            message="",
+            rationale="Demo fallback runs the next allowlisted tool.",
+        )
+    return _AgentDecision(
+        decision="request_access",
+        message="Do I have permission to run allowlisted Windows Update checks on this device?",
+        rationale="Demo fallback requests access after basic checks.",
+    )
 
 
-def _extract_known_facts(message: str) -> list[str]:
-    facts: list[str] = []
-    for fact_id, (pattern, _) in _FACT_PATTERNS.items():
-        if re.search(pattern, message):
-            facts.append(fact_id)
-    return facts
+def _conversation_summary(session: Dict[str, Any]) -> str:
+    messages = session.get("messages") or []
+    recent = messages[-8:]
+    return "\n".join(
+        f"{item.get('role', 'unknown')}: {item.get('content', '')}"
+        for item in recent
+        if isinstance(item, dict)
+    )
 
 
-def _facts_summary(facts: list[str]) -> str:
-    labels = [
-        _FACT_PATTERNS[fact_id][1]
-        for fact_id in facts
-        if fact_id in _FACT_PATTERNS
-    ]
-    if not labels:
-        return ""
-    if len(labels) == 1:
-        return labels[0]
-    return ", ".join(labels[:-1]) + f", and {labels[-1]}"
+def _missing_checks(checks_discussed: list[str]) -> list[str]:
+    return [check for check in _CHECK_ORDER if check not in checks_discussed]
 
 
-def _merge_facts(existing: list[str], incoming: list[str]) -> list[str]:
+def _next_missing_check(checks_discussed: list[str]) -> str:
+    missing = _missing_checks(checks_discussed)
+    return missing[0] if missing else ""
+
+
+def _valid_or_next_check(
+    selected_check: str | None, checks_discussed: list[str]
+) -> str:
+    if selected_check in _CHECKS:
+        return selected_check
+    return _next_missing_check(checks_discussed) or _CHECK_ORDER[-1]
+
+
+def _latest_tool_result(results: list[dict]) -> dict:
+    for result in reversed(results):
+        if isinstance(result, dict):
+            return result
+    return {}
+
+
+def _fallback_tool_for_state(state: WindowsUpdateState) -> str:
+    tool_results = state.get("tool_results") or []
+    used_tools = {
+        result.get("action") for result in tool_results if isinstance(result, dict)
+    }
+    if "collect_windows_update_status" not in used_tools:
+        return "collect_windows_update_status"
+    return "open_windows_update_settings"
+
+
+def _is_clear_approval(message: str) -> bool:
+    text = f" {(message or '').lower()} "
+    return bool(
+        re.search(
+            r"\b(yes|yep|yeah|ok|okay|approved?|allow|grant|go ahead|proceed|"
+            r"run it|do it|you have permission|i have the permission|access my device)\b",
+            text,
+        )
+    ) and not _is_clear_denial(message)
+
+
+def _is_clear_denial(message: str) -> bool:
+    text = f" {(message or '').lower()} "
+    return bool(
+        re.search(
+            r"\b(no|nope|deny|denied|do not|don't|dont|stop|cancel|never mind|"
+            r"not now)\b",
+            text,
+        )
+    )
+
+
+def _local_tool_result_message(result: dict) -> str:
+    if not result:
+        return (
+            "I did not receive a local Windows Update diagnostic result yet. "
+            "Please make sure the local diagnostic app is running at "
+            "http://127.0.0.1:8765, then try again."
+        )
+
+    action = result.get("action") or "local app action"
+    status = result.get("status") or "unknown"
+    message = result.get("message") or "The local app returned a result."
+    errors = result.get("errors") or []
+
+    if status == "failed" or errors and "local_app_unreachable" in errors:
+        return (
+            "I could not reach the local diagnostic app, so the Windows Update "
+            "check did not run. Start the local app server on this workstation "
+            "at http://127.0.0.1:8765, then ask me to retry the local check."
+        )
+
+    if action == "collect_windows_update_status":
+        lines = [f"{message} Status: {status}."]
+        services = result.get("service_statuses") or {}
+        if services:
+            service_bits = []
+            for name, data in services.items():
+                if isinstance(data, dict):
+                    service_bits.append(f"{name}={data.get('status', 'unknown')}")
+            if service_bits:
+                lines.append("Services: " + ", ".join(service_bits) + ".")
+        pending_reboot = result.get("pending_reboot")
+        if pending_reboot is not None:
+            lines.append(
+                "Pending reboot: " + ("yes." if pending_reboot else "no.")
+            )
+        if errors:
+            lines.append("Warnings: " + "; ".join(str(error) for error in errors) + ".")
+        lines.append(
+            "Please try Windows Update again. If it is still failing, tell me and "
+            "I can open Windows Update settings next."
+        )
+        return " ".join(lines)
+
+    if action == "open_windows_update_settings":
+        return (
+            f"{message} Status: {status}. Please try Windows Update again. "
+            "Is it working now, or is the issue still happening?"
+        )
+
+    return f"{message} Status: {status}."
+
+
+def _merge_checks(existing: list[str], incoming: list[str]) -> list[str]:
     merged: list[str] = []
-    for fact in [*existing, *incoming]:
-        if fact in _FACT_PATTERNS and fact not in merged:
-            merged.append(fact)
+    for check_id in [*existing, *incoming]:
+        if check_id in _CHECKS and check_id not in merged:
+            merged.append(check_id)
     return merged
