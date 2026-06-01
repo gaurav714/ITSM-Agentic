@@ -18,6 +18,13 @@ export default function Header() {
           Live Demo
         </Link>
         <Link
+          to="/chat/local_system_agent"
+          className="flex h-11 items-center gap-2 rounded-lg px-3 transition hover:bg-slate-50 hover:text-slate-950"
+        >
+          <Icon name="terminal" />
+          Local Agent
+        </Link>
+        <Link
           to="/tickets"
           className="flex h-11 items-center gap-2 rounded-lg px-3 transition hover:bg-slate-50 hover:text-slate-950"
         >
@@ -56,6 +63,7 @@ function Icon({ name }) {
         <path d="M5 3v4M3 5h4M19 17v4M17 19h4" />
       </>
     ),
+    terminal: <path d="m4 7 5 5-5 5M11 17h9" />,
   };
 
   return (

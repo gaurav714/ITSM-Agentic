@@ -46,6 +46,7 @@ export async function executeLocalAppAction(action, context = {}) {
     stop_edge: "actions.stop_edge",
     open_windows_update_settings: "actions.open_windows_update_settings",
     collect_windows_update_status: "actions.collect_windows_update_status",
+    run_powershell_task: "actions.run_powershell_task",
   };
   const toolName = toolsByAction[action];
 
@@ -60,19 +61,38 @@ export async function executeLocalAppAction(action, context = {}) {
   }
 
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 5000);
+  const timeoutMs =
+    action === "run_powershell_task"
+      ? Math.max(5000, ((context.timeoutSeconds || 15) + 2) * 1000)
+      : 5000;
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const argumentsPayload =
+      action === "run_powershell_task"
+        ? {
+            action,
+            task_id: context.taskId,
+            command: context.command,
+            timeout_seconds: context.timeoutSeconds,
+            context: {
+              session_id: context.sessionId,
+              device_name: context.deviceName,
+              diagnostic_id: context.diagnosticId,
+            },
+          }
+        : {
+            action,
+            context: {
+              session_id: context.sessionId,
+              device_name: context.deviceName,
+              diagnostic_id: context.diagnosticId,
+            },
+          };
+
     return await callLocalAppTool(
       toolName,
-      {
-        action,
-        context: {
-          session_id: context.sessionId,
-          device_name: context.deviceName,
-          diagnostic_id: context.diagnosticId,
-        },
-      },
+      argumentsPayload,
       controller.signal,
     );
   } finally {

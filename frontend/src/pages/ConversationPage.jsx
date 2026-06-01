@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import ChatWindow from "../components/ChatWindow.jsx";
 import ChatInput from "../components/ChatInput.jsx";
+import ConfirmationModal from "../components/ConfirmationModal.jsx";
 import { useConversationStore } from "../store/useConversationStore.js";
 import { sendAgentMessage, startWorkflow } from "../api/agentApi.js";
 import {
@@ -28,6 +29,7 @@ export default function ConversationPage() {
   } = useConversationStore();
 
   const startedRef = useRef(null);
+  const [pendingLocalAction, setPendingLocalAction] = useState(null);
 
   useEffect(() => {
     if (!workflowId) return;
@@ -47,6 +49,7 @@ export default function ConversationPage() {
           resp,
           sessionId,
           addAssistantResponse,
+          setPendingLocalAction,
         );
       } finally {
         setLoading(false);
@@ -70,6 +73,7 @@ export default function ConversationPage() {
         resp,
         sessionId,
         addAssistantResponse,
+        setPendingLocalAction,
       );
     } catch (e) {
       addAssistantResponse({
@@ -100,6 +104,34 @@ export default function ConversationPage() {
 
   return (
     <div className="h-full overflow-hidden bg-white">
+      <ConfirmationModal
+        open={Boolean(pendingLocalAction)}
+        title="Approve local system action"
+        message={confirmationMessage(pendingLocalAction)}
+        onCancel={() => {
+          setPendingLocalAction(null);
+          addAssistantResponse({
+            message: "Local action cancelled. Nothing was run on this workstation.",
+            workflow,
+            state,
+            cards: [],
+          });
+        }}
+        onConfirm={async () => {
+          const actionRequest = pendingLocalAction;
+          setPendingLocalAction(null);
+          setLoading(true);
+          try {
+            await executeAndSubmitLocalAction(
+              actionRequest,
+              sessionId,
+              addAssistantResponse,
+            );
+          } finally {
+            setLoading(false);
+          }
+        }}
+      />
       <div className="mx-auto flex h-full w-full max-w-[1440px] flex-col px-4 pb-5 sm:px-6 lg:px-[60px]">
         <section className="mb-5 shrink-0 rounded-b-xl bg-slate-100 px-6 py-3 text-slate-800">
           <p className="text-base leading-7">
@@ -534,6 +566,7 @@ async function maybeAutoExecuteLocalAppAction(
   resp,
   sessionId,
   addAssistantResponse,
+  setPendingLocalAction,
 ) {
   let current = resp;
   const seenActions = new Set();
@@ -542,31 +575,66 @@ async function maybeAutoExecuteLocalAppAction(
     const actionRequest = current?.metadata?.trigger_local_app_action;
     if (!actionRequest?.action) return;
 
+    if (actionRequest.requires_confirmation) {
+      setPendingLocalAction(actionRequest);
+      return;
+    }
+
     const actionKey = `${actionRequest.action}:${actionRequest.device_name || ""}`;
     if (seenActions.has(actionKey)) return;
     seenActions.add(actionKey);
 
-    try {
-      const result = await executeLocalAppAction(actionRequest.action, {
-        sessionId,
-        deviceName: actionRequest.device_name,
-        diagnosticId: actionRequest.diagnostic_id,
-      });
-      await submitLocalActionResult(sessionId, result);
-      current = await sendAgentMessage(sessionId, "local app action complete");
-      addAssistantResponse(current);
-    } catch (error) {
-      await submitLocalActionResult(sessionId, {
-        action: actionRequest.action,
-        status: "failed",
-        message: "Unable to contact the local app diagnostic server.",
-        stopped_processes: [],
-        service_statuses: {},
-        pending_reboot: null,
-        errors: [error?.message || "local_app_unreachable"],
-      });
-      current = await sendAgentMessage(sessionId, "local app action failed");
-      addAssistantResponse(current);
-    }
+    current = await executeAndSubmitLocalAction(
+      actionRequest,
+      sessionId,
+      addAssistantResponse,
+    );
   }
+}
+
+async function executeAndSubmitLocalAction(
+  actionRequest,
+  sessionId,
+  addAssistantResponse,
+) {
+  try {
+    const result = await executeLocalAppAction(actionRequest.action, {
+      sessionId,
+      deviceName: actionRequest.device_name,
+      diagnosticId: actionRequest.diagnostic_id,
+      taskId: actionRequest.task_id,
+      command: actionRequest.command,
+      timeoutSeconds: actionRequest.timeout_seconds,
+    });
+    await submitLocalActionResult(sessionId, result);
+    const current = await sendAgentMessage(sessionId, "local app action complete");
+    addAssistantResponse(current);
+    return current;
+  } catch (error) {
+    await submitLocalActionResult(sessionId, {
+      action: actionRequest.action,
+      task_id: actionRequest.task_id,
+      status: "failed",
+      message:
+        "Unable to contact the local app diagnostic server at http://127.0.0.1:8765/local-app.",
+      stopped_processes: [],
+      service_statuses: {},
+      pending_reboot: null,
+      errors: [error?.message || "local_app_unreachable"],
+    });
+    const current = await sendAgentMessage(sessionId, "local app action failed");
+    addAssistantResponse(current);
+    return current;
+  }
+}
+
+function confirmationMessage(actionRequest) {
+  if (!actionRequest) return "";
+  const command = actionRequest.command
+    ? `\n\nCommand:\n${actionRequest.command}`
+    : "";
+  const risk = actionRequest.risk_level
+    ? `\n\nRisk: ${actionRequest.risk_level}`
+    : "";
+  return `${actionRequest.summary || "Run a local system action?"}${risk}${command}`;
 }

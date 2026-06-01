@@ -63,6 +63,12 @@ class LocalActionResultPayload(BaseModel):
     action: str
     status: str
     message: str
+    task_id: Optional[str] = None
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    exit_code: Optional[int] = None
+    duration_ms: Optional[int] = None
+    needs_elevation: bool = False
     stopped_processes: List[str] = Field(default_factory=list)
     service_statuses: Dict[str, Any] = Field(default_factory=dict)
     pending_reboot: Optional[bool] = None

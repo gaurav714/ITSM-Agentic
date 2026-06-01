@@ -4,10 +4,12 @@ from typing import Dict
 
 from app.workflows.base import BaseWorkflow, PlaceholderWorkflow
 from app.workflows.employee_onboarding.workflow import NewEmployeeOnboardingWorkflow
+from app.workflows.local_system_agent.workflow import LocalSystemAgentWorkflow
 from app.workflows.system_slow.workflow import SystemSlowWorkflow
 from app.workflows.windows_update_failure.workflow import WindowsUpdateFailureWorkflow
 
 WORKFLOW_REGISTRY: Dict[str, BaseWorkflow] = {
+    "local_system_agent": LocalSystemAgentWorkflow(),
     "system_slow_diagnostics": SystemSlowWorkflow(),
     "new_employee_onboarding": NewEmployeeOnboardingWorkflow(),
     "windows_update_failure": WindowsUpdateFailureWorkflow(),

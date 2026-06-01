@@ -16,6 +16,7 @@ from app.schemas import (
 from app.tools import (
     collect_windows_update_status,
     open_windows_update_settings,
+    run_powershell_task,
     stop_edge_processes,
 )
 
@@ -137,6 +138,41 @@ def _call_tool(request: LocalAppRequest) -> Dict[str, Any]:
         ).model_dump()
         return _tool_result(request.id, response)
 
+    if name == "actions.run_powershell_task":
+        action_request = ActionExecutionRequest(
+            action=str(arguments.get("action") or "run_powershell_task"),
+            task_id=arguments.get("task_id"),
+            command=arguments.get("command"),
+            timeout_seconds=int(arguments.get("timeout_seconds") or 15),
+            context=_context_from_arguments(arguments),
+        )
+        if action_request.action != "run_powershell_task":
+            response = ActionExecutionResponse(
+                action=action_request.action,
+                status="rejected",
+                message="Only the run_powershell_task action is allowlisted here.",
+                task_id=action_request.task_id,
+            ).model_dump()
+            return _tool_result(request.id, response)
+
+        result = run_powershell_task(
+            action_request.command or "",
+            action_request.timeout_seconds,
+        )
+        response = ActionExecutionResponse(
+            action="run_powershell_task",
+            task_id=action_request.task_id,
+            status=result["status"],
+            message=result["message"],
+            stdout=result["stdout"],
+            stderr=result["stderr"],
+            exit_code=result["exit_code"],
+            duration_ms=result["duration_ms"],
+            needs_elevation=result["needs_elevation"],
+            errors=result["errors"],
+        ).model_dump()
+        return _tool_result(request.id, response)
+
     return _error(request.id, -32602, f"Unknown local app tool: {name}")
 
 
@@ -243,6 +279,27 @@ def _tool_definitions() -> list[Dict[str, Any]]:
                         },
                     },
                 },
+            },
+        },
+        {
+            "name": "actions.run_powershell_task",
+            "description": "Run an approved current-user PowerShell task and return captured output.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "const": "run_powershell_task"},
+                    "task_id": {"type": "string"},
+                    "command": {"type": "string"},
+                    "timeout_seconds": {"type": "integer", "minimum": 3, "maximum": 60},
+                    "context": {
+                        "type": "object",
+                        "properties": {
+                            "session_id": {"type": "string"},
+                            "device_name": {"type": "string"},
+                        },
+                    },
+                },
+                "required": ["action", "task_id", "command"],
             },
         },
     ]

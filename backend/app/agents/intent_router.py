@@ -14,6 +14,14 @@ from app.workflows.system_slow.prompts import INTENT_CLASSIFY_PROMPT
 
 _KEYWORD_RULES = [
     (
+        r"\b(local\s+system\s+agent|local\s+agent|system\s+agent|workstation\s+agent)\b",
+        "local_system_agent",
+    ),
+    (
+        r"\b(disk\s+(space|usage|free)|free\s+space|c\s*drive|windows\s+version|os\s+version|top\s+process(es)?|running\s+process(es)?|services?|memory\s+usage|cpu\s+usage|workstation|this\s+(pc|computer|machine|system))\b",
+        "local_system_agent",
+    ),
+    (
         r"\b(windows update|update failure|update failed|windows patch|patching failed|0x[0-9a-f]{4,})\b",
         "windows_update_failure",
     ),
@@ -73,6 +81,7 @@ def _classify_with_llm(message: str) -> Optional[str]:
         result = llm.invoke([HumanMessage(content=prompt)])
         text = (result.content or "").strip().lower()
         valid = {
+            "local_system_agent",
             "system_slow_diagnostics",
             "new_employee_onboarding",
             "windows_update_failure",

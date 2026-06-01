@@ -89,6 +89,8 @@ def _looks_like_onboarding_followup(message: str) -> bool:
 
 def _is_sticky_workflow_turn(workflow_id: str, state: str | None) -> bool:
     """Keep short in-workflow replies away from global intent routing."""
+    if workflow_id == "local_system_agent":
+        return state in {"awaiting_request", "awaiting_tool_result"}
     return workflow_id == "windows_update_failure" and state in {
         "awaiting_fix_result",
         "awaiting_agent_followup",
@@ -121,6 +123,7 @@ def _reset_workflow_context(session: Dict[str, Any]) -> None:
         "windows_update_current_check",
         "windows_update_llm_called",
         "windows_update_agent_error",
+        "local_system_pending_task",
     ):
         session.pop(key, None)
     session["state"] = "idle"

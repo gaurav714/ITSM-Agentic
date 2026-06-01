@@ -11,6 +11,7 @@ import platform
 import re
 import shutil
 import subprocess
+import time
 from typing import Any, Dict, Iterable, List
 
 try:
@@ -171,6 +172,109 @@ def collect_windows_update_status() -> Dict[str, Any]:
         "pending_reboot": pending_reboot,
         "errors": [f"Unable to read service: {name}" for name in unavailable],
     }
+
+
+def run_powershell_task(command: str, timeout_seconds: int = 15) -> Dict[str, Any]:
+    command = (command or "").strip()
+    if not command:
+        return {
+            "status": "rejected",
+            "message": "PowerShell command is required.",
+            "stdout": "",
+            "stderr": "",
+            "exit_code": None,
+            "duration_ms": 0,
+            "needs_elevation": False,
+            "errors": ["missing_command"],
+        }
+
+    if platform.system().lower() != "windows":
+        return {
+            "status": "unsupported",
+            "message": "PowerShell task execution is only supported on Windows.",
+            "stdout": "",
+            "stderr": "",
+            "exit_code": None,
+            "duration_ms": 0,
+            "needs_elevation": False,
+            "errors": ["unsupported_os"],
+        }
+
+    timeout = max(3, min(int(timeout_seconds or 15), 60))
+    start = time.monotonic()
+    try:
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                command,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+        duration_ms = int((time.monotonic() - start) * 1000)
+        stdout = _truncate_output(completed.stdout)
+        stderr = _truncate_output(completed.stderr)
+        needs_elevation = _looks_like_elevation_error(stdout, stderr)
+        if needs_elevation:
+            status = "needs_elevation"
+            message = "The command appears to require administrator privileges."
+        elif completed.returncode == 0:
+            status = "complete"
+            message = "PowerShell task completed."
+        else:
+            status = "failed"
+            message = f"PowerShell task failed with exit code {completed.returncode}."
+        return {
+            "status": status,
+            "message": message,
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": completed.returncode,
+            "duration_ms": duration_ms,
+            "needs_elevation": needs_elevation,
+            "errors": [] if completed.returncode == 0 else [stderr or message],
+        }
+    except subprocess.TimeoutExpired as exc:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        return {
+            "status": "timeout",
+            "message": f"PowerShell task timed out after {timeout} seconds.",
+            "stdout": _truncate_output(exc.stdout or ""),
+            "stderr": _truncate_output(exc.stderr or ""),
+            "exit_code": None,
+            "duration_ms": duration_ms,
+            "needs_elevation": False,
+            "errors": ["timeout"],
+        }
+    except FileNotFoundError:
+        return {
+            "status": "failed",
+            "message": "powershell.exe was not found on this system.",
+            "stdout": "",
+            "stderr": "",
+            "exit_code": None,
+            "duration_ms": int((time.monotonic() - start) * 1000),
+            "needs_elevation": False,
+            "errors": ["powershell_not_found"],
+        }
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "message": "Unable to run PowerShell task.",
+            "stdout": "",
+            "stderr": str(exc),
+            "exit_code": None,
+            "duration_ms": int((time.monotonic() - start) * 1000),
+            "needs_elevation": _looks_like_elevation_error("", str(exc)),
+            "errors": [str(exc)],
+        }
 
 
 def _system_profile(context: DiagnosticContext) -> ToolResult:
@@ -335,6 +439,30 @@ def _windows_pending_reboot() -> bool | None:
         return False
     except Exception:
         return None
+
+
+def _truncate_output(value: str, limit: int = 12000) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n...[truncated]"
+
+
+def _looks_like_elevation_error(stdout: str, stderr: str) -> bool:
+    text = f"{stdout}\n{stderr}".lower()
+    patterns = (
+        "access is denied",
+        "access denied",
+        "administrator privileges",
+        "run as administrator",
+        "requires elevation",
+        "requested operation requires elevation",
+        "unauthorizedaccessexception",
+        "permission denied",
+    )
+    return any(pattern in text for pattern in patterns)
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:

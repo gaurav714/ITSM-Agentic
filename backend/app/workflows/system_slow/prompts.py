@@ -43,6 +43,7 @@ Metrics:
 
 INTENT_CLASSIFY_PROMPT = """Classify the user's IT helpdesk request into one of these workflow ids:
 - system_slow_diagnostics
+- local_system_agent
 - new_employee_onboarding
 - windows_update_failure
 - password_reset
@@ -52,6 +53,10 @@ INTENT_CLASSIFY_PROMPT = """Classify the user's IT helpdesk request into one of 
 - ticket_status
 - application_outage
 - unknown
+
+Use local_system_agent for direct workstation/system queries such as disk space,
+disk usage, Windows version, local processes, local services, CPU, memory, or
+requests to run a local system task.
 
 Respond with ONLY the workflow id.
 User message: {message}

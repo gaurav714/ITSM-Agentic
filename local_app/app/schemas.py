@@ -44,6 +44,9 @@ class DiagnosticSearchResponse(BaseModel):
 
 class ActionExecutionRequest(BaseModel):
     action: str
+    task_id: Optional[str] = None
+    command: Optional[str] = None
+    timeout_seconds: int = 15
     context: DiagnosticContext = Field(default_factory=DiagnosticContext)
 
 
@@ -51,6 +54,12 @@ class ActionExecutionResponse(BaseModel):
     action: str
     status: str
     message: str
+    task_id: Optional[str] = None
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    exit_code: Optional[int] = None
+    duration_ms: Optional[int] = None
+    needs_elevation: bool = False
     stopped_processes: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
     opened_uri: Optional[str] = None
