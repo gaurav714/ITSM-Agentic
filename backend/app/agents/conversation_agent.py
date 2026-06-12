@@ -38,6 +38,11 @@ def handle_user_message(
     ):
         workflow_id = "new_employee_onboarding"
 
+    # Browser/local-app handoff messages are internal protocol markers, not
+    # new user intent. Keep them in the workflow that requested the handoff.
+    elif not forced_workflow and current_workflow and _is_protocol_message(message):
+        workflow_id = current_workflow
+
     # Supervisor routing: while a workflow is active, a clear intent for a
     # different workflow should switch context instead of being interpreted as
     # the current workflow's next field.
@@ -91,6 +96,13 @@ def _is_sticky_workflow_turn(workflow_id: str, state: str | None) -> bool:
     """Keep short in-workflow replies away from global intent routing."""
     if workflow_id == "local_system_agent":
         return state in {"awaiting_request", "awaiting_tool_result"}
+    if workflow_id == "system_slow_diagnostics":
+        return state in {
+            "awaiting_browser_diagnostics",
+            "awaiting_remediation_confirmation",
+            "awaiting_remediation_action",
+            "awaiting_confirmation",
+        }
     return workflow_id == "windows_update_failure" and state in {
         "awaiting_fix_result",
         "awaiting_agent_followup",
@@ -124,6 +136,15 @@ def _reset_workflow_context(session: Dict[str, Any]) -> None:
         "windows_update_llm_called",
         "windows_update_agent_error",
         "local_system_pending_task",
+        "local_action_result",
     ):
         session.pop(key, None)
     session["state"] = "idle"
+
+
+def _is_protocol_message(message: str) -> bool:
+    return (message or "").strip().lower() in {
+        "browser diagnostics ready",
+        "local app action complete",
+        "local app action failed",
+    }

@@ -1,202 +1,181 @@
-# Project Status — AI Helpdesk Assistant Platform
+# Project Status - AI Helpdesk Assistant Platform
 
-_Last updated: 2026-05-20_
+_Last updated: 2026-06-11_
 
 ## Overview
 
-A modular, conversational AI IT helpdesk platform. Iteration 1 focuses on the **System Slow Diagnostics** workflow end-to-end, with a generic frontend shell and backend architecture designed to host many workflows over time.
+A modular, conversational AI IT helpdesk platform with a FastAPI backend,
+React/Vite frontend, and localhost companion app for workstation diagnostics.
+The active workflows are **Local System Agent**, **System Slow Diagnostics**,
+**New Employee Onboarding**, and **Windows Update Failure**.
 
 - **Backend:** Python 3, FastAPI, LangGraph, LangChain, Pydantic
 - **Frontend:** React, Vite, TailwindCSS, React Query, Zustand, Axios
-- **LLM:** OpenAI (`gpt-4o-mini` by default; configurable via `OPENAI_MODEL`)
+- **LLM:** OpenAI (`gpt-4o-mini` by default; configurable with `OPENAI_MODEL`)
 
 ---
 
-## Current State — What Works Today
+## Current State
 
-### Backend — implemented & tested
+### Backend
 
-| Area                                                                | Status | Notes                                                                                 |
-| ------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------- |
-| FastAPI app + CORS                                                  | ✅     | [main.py](backend/app/main.py); 14 routes                                             |
-| Workflow registry pattern                                           | ✅     | [workflow_registry.py](backend/app/services/workflow_registry.py)                     |
-| `BaseWorkflow` abstract contract                                    | ✅     | [base.py](backend/app/workflows/base.py)                                              |
-| New Employee Onboarding workflow                                    | ✅     | LangGraph tool-using agent, duplicate check, mock identity DB, RBAC groups, MFA, welcome email |
-| Windows Update Failure workflow                                     | ✅     | Cyclic LangGraph workflow with an LLM decision node, one-check-at-a-time troubleshooting, local access approval gate, and allowlisted Windows Update local tools |
-| In-memory session store                                             | ✅     | [session_store.py](backend/app/memory/session_store.py) — replace with Redis/DB later |
-| Diagnostic router (priority: Intune → SCCM → Browser + local app)   | ✅     | [diagnostic_router.py](backend/app/services/diagnostic_router.py)                     |
-| Mock Intune adapter                                                 | ✅     | `LAPTOP-INTUNE-01`                                                                    |
-| Mock SCCM adapter                                                   | ✅     | `DESKTOP-SCCM-42`                                                                     |
-| Browser diagnostics adapter                                         | ✅     | Real metrics pushed from frontend                                                     |
-| Mock ticketing adapter                                              | ✅     | Returns `INC########` ids                                                             |
-| Conversation agent / message router                                 | ✅     | [conversation_agent.py](backend/app/agents/conversation_agent.py)                     |
-| Browser → local diagnostic app → backend handoff             | ✅     | Browser can call a user-system local app and submit its structured response with diagnostics |
-| Local diagnostic app scaffold                                | ✅     | [local_app](local_app) exposes localhost `/local-app` with `tools/list` and `tools/call` |
-| Local remediation action handoff                                    | ✅     | User can approve allowlisted local app actions such as stopping Edge or collecting Windows Update status |
+| Area | Status | Notes |
+| --- | --- | --- |
+| FastAPI app + CORS | Complete | `/health`, workflow, diagnostics, ticket, and local-action endpoints |
+| Workflow registry pattern | Complete | `local_system_agent`, `system_slow_diagnostics`, `new_employee_onboarding`, `windows_update_failure`, plus placeholders |
+| Conversation router | Complete | Sticky workflow routing and protocol-message protection for local/browser handoffs |
+| Local System Agent | Complete | Backend plans approval-gated current-user PowerShell tasks and interprets returned output |
+| System Slow Diagnostics | Complete | Uses browser diagnostics plus local app `diagnostics.search`; does not use generic PowerShell |
+| New Employee Onboarding | Complete | LangGraph tool-using agent with mock identity operations |
+| Windows Update Failure | Complete | Agentic decision loop with approval-gated allowlisted Windows Update local actions |
+| Browser/local app handoff | Complete | Browser can call localhost local app and forward structured results to backend |
+| Generic local action result ingestion | Complete | `/diagnostics/local-action` stores local action results, including `task_context` |
+| Mock ticketing adapter | Complete | Returns mock `INC########` ticket ids |
 
-### Windows Update agentic workflow
+### Local System Agent
 
-The `windows_update_failure` workflow is now a cyclic LangGraph workflow with an LLM decision node on each turn.
+The `local_system_agent` workflow handles direct workstation/system questions
+and local tasks.
 
-- The LLM interprets the raw user message and chooses `ask_check`, `request_access`, `run_tool`, `mark_resolved`, `stop_workflow`, or `clarify`.
-- Session context tracks checks discussed, current check, access approval, tool results, model trace, and model errors.
-- The workflow asks one troubleshooting check at a time and avoids repeating checks already discussed.
-- Local access is requested once; while in `awaiting_access_approval`, clear approval should trigger `collect_windows_update_status` instead of asking permission again.
-- Deterministic guards still enforce local-access approval and the local tool allowlist.
-- Silent deterministic fallback is disabled by default; demo fallback requires `WINDOWS_UPDATE_ALLOW_DETERMINISTIC_FALLBACK=true`.
+- Backend produces a local execution request with `task_id`, summary, risk
+  level, command, timeout, expected result, and interpretation context.
+- Frontend shows a highlighted permission modal before calling the local app.
+- Local app runs `actions.run_powershell_task` as the current user with
+  `-NoProfile`, timeout bounds, stdout/stderr capture, exit code, and
+  `needs_elevation` detection.
+- Frontend submits the execution result plus the original `task_context` to
+  `/diagnostics/local-action`.
+- Backend summarizes the returned output for the user. Simple facts such as
+  disk space, time, timezone, hostname, current user, DOTA2 installed checks,
+  and microphone availability have deterministic plans and direct answers.
+- Planner validation rejects display-only formatting, overly large commands,
+  metadata-only stdout schemas, and broad uncapped commands.
 
-### Backend — **Agentic** capabilities (LLM-active when `OPENAI_API_KEY` is set)
+Safety limits:
 
-| Capability                                                | Status | Implementation                                                                           |
-| --------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------- |
-| LLM intent classification (free-text → workflow id)       | ✅     | [intent_router.py](backend/app/agents/intent_router.py)                                  |
-| LLM device-name extraction (structured output)            | ✅     | `_extract_device_name` in [workflow.py](backend/app/workflows/system_slow/workflow.py)   |
-| LLM yes/no confirmation classification                    | ✅     | `_classify_confirmation` in [workflow.py](backend/app/workflows/system_slow/workflow.py) |
-| LLM-generated diagnostic summary                          | ✅     | `_summarize` in [workflow.py](backend/app/workflows/system_slow/workflow.py)             |
-| LLM-generated ticket draft (title, description, priority) | ✅     | [ticket_service.py](backend/app/services/ticket_service.py)                              |
-| Shared LLM client + structured-output helper              | ✅     | [llm.py](backend/app/services/llm.py)                                                    |
-| Deterministic fallback for most LLM calls                 | ✅     | Windows Update decision fallback is explicit demo mode only                              |
-| Local app telemetry ingestion                             | ✅     | Browser-submitted local app output is normalized, summarized, and used before ticketing |
+- Every PowerShell task is explicit-workflow only and requires UI approval.
+- Commands run as the current local app user.
+- No administrator elevation is attempted.
+- Timeout and output truncation protect the UI and backend.
 
-### Backend — REST endpoints (all working)
+### Local App Tools
 
-- `GET /health`
-- `GET /workflows`
-- `POST /agent/message`
-- `POST /agent/start_workflow`
-- `POST /diagnostics/start`
-- `GET /diagnostics/{id}`
-- `POST /diagnostics/browser`
-- `POST /tickets/draft`
-- `POST /tickets/create`
-- `GET /tickets`
+Current JSON-RPC tools exposed at `http://127.0.0.1:8765/local-app`:
 
-### Frontend — implemented
+```text
+diagnostics.search
+actions.stop_edge
+actions.collect_windows_update_status
+actions.open_windows_update_settings
+actions.run_powershell_task
+```
 
-| Area                                                   | Status |
-| ------------------------------------------------------ | ------ |
-| Layout: Header / Sidebar / Main                        | ✅     |
-| Pages: Home, Conversation, Tickets, Settings           | ✅     |
-| Chat UI with streaming-style card interleaving         | ✅     |
-| Generic card renderer (workflow-aware)                 | ✅     |
-| Browser diagnostics auto-collection on backend trigger | ✅     |
-| React Query data fetching                              | ✅     |
-| Zustand session store                                  | ✅     |
-| Sidebar pulled live from `/workflows`                  | ✅     |
+`diagnostics.search` remains the System Slow path. `actions.run_powershell_task`
+is reserved for backend-requested Local System Agent tasks.
 
-### Active workflows in the registry
+### Frontend
 
-| id                        | Title                   | Active         |
-| ------------------------- | ----------------------- | -------------- |
-| `system_slow_diagnostics` | System Slow Diagnostics | ✅             |
-| `new_employee_onboarding` | New Employee Onboarding | ✅             |
-| `windows_update_failure`  | Windows Update Failure  | ✅             |
-| `password_reset`          | Password Reset          | ⏳ Coming soon |
-| `vpn_access`              | VPN Access Request      | ⏳ Coming soon |
-| `software_install`        | Software Installation   | ⏳ Coming soon |
-| `account_unlock`          | Account Unlock          | ⏳ Coming soon |
-| `ticket_status`           | Ticket Status Lookup    | ⏳ Coming soon |
-| `application_outage`      | Application Outage      | ⏳ Coming soon |
+| Area | Status |
+| --- | --- |
+| Header/sidebar/main layout | Complete |
+| Conversation, Tickets, and Settings pages | Complete |
+| Workflow navigation visible from chat routes | Complete |
+| Fallback workflow links if `/workflows` fails | Complete |
+| Browser diagnostics auto-collection on backend trigger | Complete |
+| Generic local app action execution | Complete |
+| Highlighted local permission modal | Complete |
+| Backend URL/status-aware error messages | Complete |
+| React Query data fetching and Zustand session store | Complete |
 
-> **Removed from scope:** `deployment_request` and `kubernetes_issue` (no longer registered).
+### Active Workflows
 
-### Security guardrails in place
-
-- LLM never executes commands or shell.
-- Adapters are an explicit allowlist; no dynamic dispatch.
-- Device names validated by regex (`^[A-Za-z0-9][A-Za-z0-9_-]{1,31}$`) **after** LLM extraction, blocking prompt-injection payloads.
-- Tickets only created after the deterministic confirmation gate — the LLM cannot trigger ticket creation directly.
-- API keys live only in backend `.env`; never exposed to the frontend.
-- CORS restricted to configured origins.
+| id | Title | Active |
+| --- | --- | --- |
+| `local_system_agent` | Local System Agent | Yes |
+| `system_slow_diagnostics` | System Slow Diagnostics | Yes |
+| `new_employee_onboarding` | New Employee Onboarding | Yes |
+| `windows_update_failure` | Windows Update Failure | Yes |
+| `password_reset` | Password Reset | Coming soon |
+| `vpn_access` | VPN Access Request | Coming soon |
+| `software_install` | Software Installation | Coming soon |
+| `account_unlock` | Account Unlock | Coming soon |
+| `ticket_status` | Ticket Status Lookup | Coming soon |
+| `application_outage` | Application Outage | Coming soon |
 
 ---
 
-## Pending — Not Yet Implemented
+## Security Guardrails
 
-### Agentic upgrades (next high-value steps)
+- The LLM never directly executes commands.
+- Backend-generated Local System Agent commands are shown to the user before
+  the browser calls the local app.
+- Generic PowerShell runs only as the current user and reports
+  `needs_elevation` instead of elevating.
+- System Slow and Windows Update use dedicated allowlisted local tools.
+- Ticket creation still requires user confirmation.
+- API keys live only in backend `.env`; they are never exposed to the frontend.
+- CORS is controlled by configured origins and optional origin regex.
 
-| #   | Item                                                                                                                                                                                                                     | Why it matters                                                       |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| 1   | **Real LangGraph execution path** — current `StateGraph` nodes are pass-throughs; `handle()` is a hand-coded ladder. Move logic into nodes with conditional edges driven by session state.                               | Enables tracing, replay, and easier branching for future workflows.  |
-| 2   | **LangGraph checkpointer** (e.g. `MemorySaver` / SQLite) keyed by `session_id`.                                                                                                                                          | Replaces the custom in-memory dict store; adds replay & persistence. |
-| 3   | **Package/install the user-system local app** — create installer/service packaging, startup policy, auth token/CORS hardening, and signed distribution for the workstation app. | The scaffold exists; packaging and hardening make it deployable beyond local development. |
-| 4   | **Multi-turn conversation memory** with rolling summary.                                                                                                                                                                 | Long sessions don't blow the context window.                         |
-| 5   | **Streaming responses** (SSE) from `/agent/message`.                                                                                                                                                                     | Token-level UX in the chat.                                          |
-| 6   | **LangSmith tracing** (`LANGCHAIN_TRACING_V2=true`).                                                                                                                                                                     | Observability for every LLM/tool call.                               |
-| 7   | **Confidence-driven clarification** in intent router — if LLM confidence is low, ask a clarifying question instead of dumping the workflow list.                                                                         | Better UX for vague requests.                                        |
+---
+
+## Pending Work
+
+### Platform hardening
+
+- Persistent session storage instead of the in-memory session store.
+- Authentication and authorization.
+- Rate limiting on `/agent/message`.
+- Request/response logging with PII redaction.
+- Unit and integration test suite in CI.
+- Containerization for backend and frontend.
+
+### Local app deployment
+
+- Installer/service packaging.
+- Auth token or stronger localhost caller validation.
+- Signed distribution and startup policy.
+
+### Future integrations
+
+| Iteration | Item |
+| --- | --- |
+| 2 | Real Intune via Microsoft Graph |
+| 3 | Real SCCM/MECM integration |
+| 4 | Hardened local app deployment |
+| 5 | Real ServiceNow/Jira ticketing |
 
 ### Workflows still to build
 
-| Workflow              | Notes                                                                                    |
-| --------------------- | ---------------------------------------------------------------------------------------- |
-| Password Reset        | Likely the simplest — LLM extracts username, calls mock identity adapter, raises ticket. |
-| VPN Access Request    | Form-style intake → approval workflow → ticket.                                          |
-| Software Installation | Catalog lookup + license check + ticket.                                                 |
-| Account Unlock        | Identity adapter call.                                                                   |
-| Ticket Status Lookup  | Read-only against `mock_ticket_adapter`; good first multi-turn test of the registry.     |
-| Application Outage    | Aggregate reports, dedupe by app id, notify on-call.                                     |
-
-### Adapter integrations (mocked → real)
-
-| Iteration | Item                                                                       |
-| --------- | -------------------------------------------------------------------------- |
-| 2         | **Real Intune** via Microsoft Graph (`DeviceManagement.Read.All`, etc.).   |
-| 3         | **Real SCCM/MECM** via WMI / SCCM SDK / approved scripts.                  |
-| 4         | **Hardened local app server deployment** — installer/service + auth + signed distribution. |
-| 5         | **Real ServiceNow / Jira** ticketing — replace `mock_ticket_adapter`.      |
-
-### Platform hardening (non-LLM)
-
-- Persistent session storage (Redis or Postgres) instead of in-memory dict.
-- AuthN/AuthZ — currently no user identity; assumes trusted callers.
-- Rate limiting on `/agent/message`.
-- Request/response logging with PII redaction.
-- Unit + integration tests (pytest); current coverage is ad-hoc PowerShell smoke scripts ([tests_smoke.ps1](backend/tests_smoke.ps1), [tests_smoke2.ps1](backend/tests_smoke2.ps1), [tests_agentic.ps1](backend/tests_agentic.ps1)).
-- CI pipeline (GitHub Actions) — lint, type-check, test, build.
-- Containerization (Dockerfile + docker-compose for backend + frontend).
-
-### Frontend polish
-
-- Confirmation modal on ticket creation (component exists, not wired in).
-- Conversation history sidebar / per-session navigation.
-- Error toasts (currently silent on API failure inside conversation).
-- Empty / loading states for the Tickets page.
-- Markdown rendering in assistant messages (LLM occasionally emits markdown).
-- Mobile layout (sidebar is hidden on small screens — no replacement nav).
+- Password Reset
+- VPN Access Request
+- Software Installation
+- Account Unlock
+- Ticket Status Lookup
+- Application Outage
 
 ---
 
-## Acceptance Criteria — iteration 1
-
-| Criterion                                                            | Status                                                  |
-| -------------------------------------------------------------------- | ------------------------------------------------------- |
-| Frontend shows multiple workflow options                             | ✅                                                      |
-| Only System Slow workflow is active                                  | ✅                                                      |
-| User can type "My system is slow"                                    | ✅                                                      |
-| Assistant triggers local app diagnostics without asking device name       | ✅                                                   |
-| Diagnostic router selects method                                     | ✅                                                      |
-| Browser diagnostics work as fallback                                 | ✅                                                      |
-| Diagnostic results are summarized                                    | ✅ (LLM when key set; deterministic fallback otherwise) |
-| Ticket draft is generated                                            | ✅ (LLM when key set)                                   |
-| User can confirm ticket creation                                     | ✅ (LLM-classified confirmation)                        |
-| Mock ticket number is returned                                       | ✅                                                      |
-| Architecture supports adding future workflows without major rewrites | ✅                                                      |
-
-**Iteration 1 is complete.** Several agentic upgrades from step 1 of the original plan have already been delivered ahead of schedule.
-
----
-
-## How to run
+## How To Run
 
 ```powershell
 # Backend
 cd backend
-.\.venv\Scripts\Activate.ps1   # (already created)
-uvicorn app.main:app --port 8000
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload --port 8000
 
-# Frontend (separate terminal)
+# Frontend
 cd frontend
 npm run dev
+
+# Local app
+cd local_app
+..\backend\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 ```
 
-App: <http://localhost:5173> · API: <http://localhost:8000/docs>
+App: <http://localhost:5173>
+API docs: <http://localhost:8000/docs>
+Local app: <http://127.0.0.1:8765/local-app>
+
+For LAN browser access, run the backend with `--host 0.0.0.0`, set
+`VITE_API_BASE_URL` to the backend LAN URL, and configure backend CORS through
+`ALLOWED_ORIGINS` or `ALLOWED_ORIGIN_REGEX`.

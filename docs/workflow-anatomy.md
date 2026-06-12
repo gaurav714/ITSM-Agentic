@@ -218,6 +218,15 @@ The registry lets the backend:
 - List available workflows for the frontend.
 - Distinguish active workflows from placeholders.
 
+Current active workflows include:
+
+```text
+local_system_agent
+system_slow_diagnostics
+new_employee_onboarding
+windows_update_failure
+```
+
 ## System Slow Diagnostics Example
 
 Workflow id:
@@ -390,6 +399,93 @@ System Slow Diagnostics uses prompts for optional LLM behavior:
 
 The workflow does not depend entirely on the LLM. Common yes/no replies,
 diagnostic execution, and ticket drafting all have deterministic fallback paths.
+
+## Local System Agent Example
+
+Workflow id:
+
+```text
+local_system_agent
+```
+
+Primary files:
+
+- `backend/app/workflows/local_system_agent/workflow.py`
+- `backend/app/agents/intent_router.py`
+- `frontend/src/pages/ConversationPage.jsx`
+- `frontend/src/utils/browserDiagnostics.js`
+- `local_app/app/local_app.py`
+- `local_app/app/tools.py`
+
+The Local System Agent handles direct workstation/system questions and approved
+local tasks. It is the generic path for requests such as:
+
+```text
+how much disk space is free on C drive?
+what is the current system time?
+what is my computer name?
+is DOTA2 installed?
+what microphone is available?
+Chrome is not working
+```
+
+### Local System Agent Flow
+
+```text
+User
+  -> React chat UI
+  -> POST /agent/message
+  -> LocalSystemAgentWorkflow.handle
+  -> backend creates trigger_local_app_action
+  -> frontend shows approval modal with the command
+  -> frontend calls localhost actions.run_powershell_task
+  -> local app runs current-user PowerShell
+  -> frontend POSTs /diagnostics/local-action with result + task_context
+  -> LocalSystemAgentWorkflow interprets the result
+  -> assistant message answers the original request
+```
+
+The local app does not interpret PowerShell output for the user. It returns
+structured execution data such as `status`, `stdout`, `stderr`, `exit_code`,
+`duration_ms`, `needs_elevation`, and `errors`. The frontend forwards that data
+with the original task context so the backend can answer directly.
+
+### Local System Agent Planning
+
+The workflow has deterministic read-only plans for common facts such as disk
+space, current time/timezone, hostname, current user, microphone availability,
+and selected installed-app checks. Broader requests use backend LLM planning
+when `OPENAI_API_KEY` is configured.
+
+Planner validation rejects:
+
+- commands over the configured length limit;
+- display-only formatting such as `Format-Table`;
+- missing `ConvertTo-Json` for diagnostic tasks;
+- broad uncapped list/event/process commands;
+- output schemas that mostly contain planner metadata instead of result fields.
+
+### Local System Agent Safety
+
+- Every local PowerShell task is confirmation-gated in the frontend.
+- Commands run as the current local app user.
+- No administrator elevation is attempted.
+- Timeout and output truncation protect the UI and backend.
+- If access is denied or admin rights appear required, the local app returns
+  `needs_elevation`.
+
+### Routing Boundaries
+
+The intent router sends direct workstation/system questions to
+`local_system_agent`. It also routes local app/browser issues such as
+`Chrome not working` there unless the user explicitly describes a multi-user
+service outage.
+
+System Slow Diagnostics remains sticky while it waits for browser diagnostics
+or remediation results. Internal protocol messages such as
+`browser diagnostics ready`, `local app action complete`, and
+`local app action failed` stay inside the active workflow and should not be
+reclassified as Local System Agent requests.
 
 ## UI Cards Returned by the Workflow
 

@@ -47,6 +47,7 @@ Current tools:
 - `actions.stop_edge`
 - `actions.collect_windows_update_status`
 - `actions.open_windows_update_settings`
+- `actions.run_powershell_task`
 
 The `diagnostics.search` structured tool result includes `summary`,
 `recommendation`, `tools`, `actions`, and `metrics`.
@@ -179,6 +180,53 @@ Structured output includes:
 - `opened_uri`
 - `errors`
 
+### `actions.run_powershell_task`
+
+Runs a backend-planned, user-approved PowerShell command as the current Windows
+user. This tool is used by the Local System Agent. The local app does not plan
+commands or interpret the result for the user; it only executes the approved
+command and returns structured execution data to the browser, which forwards it
+to the backend.
+
+Input:
+
+```json
+{
+  "action": "run_powershell_task",
+  "task_id": "LOCAL-1234ABCD",
+  "command": "Get-Date | Select-Object DateTime | ConvertTo-Json -Compress",
+  "timeout_seconds": 10,
+  "context": {
+    "session_id": "browser-session-id",
+    "device_name": "LOCAL-ENDPOINT"
+  }
+}
+```
+
+Structured output includes:
+
+- `action`
+- `task_id`
+- `status`
+- `message`
+- `stdout`
+- `stderr`
+- `exit_code`
+- `duration_ms`
+- `needs_elevation`
+- `errors`
+
+Status values include `complete`, `failed`, `timeout`, `rejected`,
+`needs_elevation`, and `unsupported`.
+
+Example JSON-RPC request:
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8765/local-app `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":"ps-1","method":"tools/call","params":{"name":"actions.run_powershell_task","arguments":{"action":"run_powershell_task","task_id":"LOCAL-DEMO","command":"Get-Date | Select-Object DateTime | ConvertTo-Json -Compress","timeout_seconds":10,"context":{"session_id":"demo","device_name":"LOCAL-ENDPOINT"}}}}'
+```
+
 ## Remediation Actions
 
 The app exposes only allowlisted remediation actions as local app tools. At the
@@ -188,10 +236,17 @@ moment, the action tools are:
 actions.stop_edge
 actions.collect_windows_update_status
 actions.open_windows_update_settings
+actions.run_powershell_task
 ```
 
-They accept their matching `action` values and do not execute arbitrary
-commands.
+The first three are workflow-specific allowlisted actions. The
+`actions.run_powershell_task` tool is generic, but it should only be called
+after the backend has planned a task and the frontend has shown the user the
+command for approval.
+
+PowerShell tasks run as the current user, do not attempt elevation, have a
+bounded timeout, and return captured stdout/stderr instead of displaying output
+directly in the UI.
 
 ## Build Windows EXE
 
@@ -283,6 +338,7 @@ diagnostics.search
 actions.stop_edge
 actions.collect_windows_update_status
 actions.open_windows_update_settings
+actions.run_powershell_task
 ```
 
 You can also run:

@@ -41,6 +41,7 @@ Current tools:
 - `actions.stop_edge`
 - `actions.collect_windows_update_status`
 - `actions.open_windows_update_settings`
+- `actions.run_powershell_task`
 
 ## Diagnostics Request
 
@@ -137,6 +138,7 @@ Current action:
 actions.stop_edge
 actions.collect_windows_update_status
 actions.open_windows_update_settings
+actions.run_powershell_task
 ```
 
 Request:
@@ -171,6 +173,110 @@ Structured response:
   "errors": []
 }
 ```
+
+## Local System Agent PowerShell Tasks
+
+The Local System Agent uses `actions.run_powershell_task` for generic local
+system questions. The local app is only the executor: the backend plans the
+task, the frontend asks the user for approval, and the backend interprets the
+returned output.
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "ps-1",
+  "method": "tools/call",
+  "params": {
+    "name": "actions.run_powershell_task",
+    "arguments": {
+      "action": "run_powershell_task",
+      "task_id": "LOCAL-1234ABCD",
+      "command": "Get-PSDrive -Name C | Select-Object Name,Used,Free | ConvertTo-Json -Compress",
+      "timeout_seconds": 10,
+      "context": {
+        "session_id": "browser-session-id",
+        "device_name": "LOCAL-ENDPOINT"
+      }
+    }
+  }
+}
+```
+
+Structured response:
+
+```json
+{
+  "action": "run_powershell_task",
+  "task_id": "LOCAL-1234ABCD",
+  "status": "complete",
+  "message": "PowerShell task completed.",
+  "stdout": "{\"Name\":\"C\",\"Used\":123,\"Free\":456}",
+  "stderr": "",
+  "exit_code": 0,
+  "duration_ms": 240,
+  "needs_elevation": false,
+  "errors": []
+}
+```
+
+Status values:
+
+```text
+complete
+failed
+timeout
+rejected
+needs_elevation
+unsupported
+```
+
+The local app runs the command as the current user with `powershell
+-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command <command>`. It
+captures stdout, stderr, exit code, duration, and elevation-looking failures.
+It does not attempt administrator elevation.
+
+## Local Action Result Forwarding
+
+After the frontend receives a local action result, it sends it to the backend:
+
+```text
+POST /diagnostics/local-action
+```
+
+For Local System Agent tasks, the payload includes both the execution result and
+the backend-provided task context:
+
+```json
+{
+  "session_id": "browser-session-id",
+  "action": "run_powershell_task",
+  "task_id": "LOCAL-1234ABCD",
+  "status": "complete",
+  "message": "PowerShell task completed.",
+  "stdout": "{\"Name\":\"C\",\"FreeGB\":127.54,\"UsedGB\":348.39}",
+  "stderr": "",
+  "exit_code": 0,
+  "duration_ms": 240,
+  "needs_elevation": false,
+  "errors": [],
+  "task_context": {
+    "user_request": "how much disk space is free on C drive?",
+    "summary": "Check free and used disk space on C: drive.",
+    "command": "Get-PSDrive -Name C ...",
+    "expected_result": "JSON with used and free disk space in GB.",
+    "interpretation_hint": "Explain free and used disk space in GB and mention the drive.",
+    "risk_level": "low",
+    "timeout_seconds": 10
+  }
+}
+```
+
+The backend stores this as `local_action_result` in the session and generates
+the user-facing answer from the original request, task context, stdout/stderr,
+exit code, and status. The frontend should not interpret PowerShell output for
+the user.
 
 ## Windows Update Actions
 
@@ -267,3 +373,8 @@ Structured response:
 Local action execution is gated by backend workflow state. The LLM may select an
 allowlisted action, but the workflow will not trigger it until the user has
 explicitly approved local workstation access.
+
+Generic PowerShell execution is also gated by backend workflow state and the
+frontend approval modal. The command is displayed before execution. Commands run
+only as the current local app user, have bounded timeouts and truncated output,
+and return `needs_elevation` instead of trying to elevate.

@@ -56,7 +56,13 @@ INTENT_CLASSIFY_PROMPT = """Classify the user's IT helpdesk request into one of 
 
 Use local_system_agent for direct workstation/system queries such as disk space,
 disk usage, Windows version, local processes, local services, CPU, memory, or
-requests to run a local system task.
+requests to run a local system task. Also use local_system_agent for
+single-user workstation app/browser problems such as "Chrome not working",
+"browser not opening", "Edge not responding", or "app not launching".
+
+Use application_outage only when the user explicitly describes a service outage,
+many/all users affected, company-wide impact, or a service/application down for
+everyone.
 
 Respond with ONLY the workflow id.
 User message: {message}

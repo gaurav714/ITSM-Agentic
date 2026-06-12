@@ -64,6 +64,7 @@ class LocalActionResultPayload(BaseModel):
     status: str
     message: str
     task_id: Optional[str] = None
+    task_context: Dict[str, Any] = Field(default_factory=dict)
     stdout: Optional[str] = None
     stderr: Optional[str] = None
     exit_code: Optional[int] = None

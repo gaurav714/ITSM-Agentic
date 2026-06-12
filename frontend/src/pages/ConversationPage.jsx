@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate, useParams } from "react-router-dom";
 import ChatWindow from "../components/ChatWindow.jsx";
 import ChatInput from "../components/ChatInput.jsx";
 import ConfirmationModal from "../components/ConfirmationModal.jsx";
 import { useConversationStore } from "../store/useConversationStore.js";
-import { sendAgentMessage, startWorkflow } from "../api/agentApi.js";
+import { listWorkflows, sendAgentMessage, startWorkflow } from "../api/agentApi.js";
+import { API_BASE_URL, API_LOCAL_FALLBACK_URL } from "../api/client.js";
 import {
   submitBrowserDiagnostics,
   submitLocalActionResult,
@@ -16,6 +18,7 @@ import {
 
 export default function ConversationPage() {
   const { workflowId } = useParams();
+  const navigate = useNavigate();
   const {
     sessionId,
     messages,
@@ -51,6 +54,11 @@ export default function ConversationPage() {
           addAssistantResponse,
           setPendingLocalAction,
         );
+      } catch (e) {
+        addAssistantResponse({
+          message: formatAssistantError(e, "starting the workflow"),
+          cards: [],
+        });
       } finally {
         setLoading(false);
       }
@@ -77,8 +85,7 @@ export default function ConversationPage() {
       );
     } catch (e) {
       addAssistantResponse({
-        message:
-          "Sorry, something went wrong contacting the assistant. Please try again.",
+        message: formatAssistantError(e, "contacting the assistant"),
         cards: [],
       });
     } finally {
@@ -93,21 +100,22 @@ export default function ConversationPage() {
     .reverse()
     .find((card) => card.kind === "diagnostic_result" || card.kind === "diagnostic_status");
   const automationProgress = getAutomationProgress(state, cards);
-  const intentLabel = workflow
-    ? workflow.replaceAll("_", " ")
-    : messages.length
-      ? "General IT support"
-      : "Awaiting first message...";
-  const confidence = messages.length ? Math.min(96, 42 + messages.length * 13) : 0;
   const workflowLabel = workflow ? workflow.replaceAll("_", " ") : "Password Reset";
-  const expectedResponses = getExpectedResponses(workflow);
+  const agentReasoningItems = getAgentReasoningItems(cards, latestDiagnostic);
 
   return (
     <div className="h-full overflow-hidden bg-white">
       <ConfirmationModal
         open={Boolean(pendingLocalAction)}
         title="Approve local system action"
+        highlightMessage={
+          pendingLocalAction
+            ? "The agent wants to run a command on your local device. Review it before approving."
+            : ""
+        }
         message={confirmationMessage(pendingLocalAction)}
+        detailLabel={pendingLocalAction?.command ? "PowerShell command" : ""}
+        detailText={pendingLocalAction?.command || ""}
         onCancel={() => {
           setPendingLocalAction(null);
           addAssistantResponse({
@@ -139,6 +147,7 @@ export default function ConversationPage() {
             and live workflow telemetry in one operational console.
           </p>
         </section>
+        <MobileWorkflowLauncher onSelect={(id) => navigate(`/chat/${id}`)} />
 
         <section className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[1.05fr_1.05fr_1fr]">
           <Panel
@@ -158,60 +167,25 @@ export default function ConversationPage() {
             icon="brain"
             iconTone="from-slate-950 to-slate-800"
             title="Reasoning engine"
-            subtitle="Intent · Classification · Actions"
+            subtitle="Trace · Evidence · Decisions"
             status={<CodePill label="zoe-core v4.2" />}
           >
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
-              <div className="flex flex-col gap-5">
-              <MetricBlock kicker="Intent" title={toTitleCase(intentLabel)}>
-                <div className="mt-5 grid grid-cols-2 gap-5 text-sm">
-                  <div>
-                    <p className="text-slate-600">Classification</p>
-                    <span className="mt-2 inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-xs font-semibold text-slate-950 shadow-sm ring-1 ring-slate-100">
-                      <MiniIcon name="shield" />
-                      L1
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-slate-600">Confidence</p>
-                    <Progress value={confidence} className="mt-3" />
-                  </div>
-                </div>
-              </MetricBlock>
-
-              <MetricBlock kicker="Next action" title={toTitleCase(nextActionForState(state, loading))} />
-
-              {expectedResponses.length > 0 && (
-                <div>
-                  <SectionHeader
-                    icon="list"
-                    label="Expected responses"
-                    value={`${expectedResponses.length} steps`}
-                  />
-                  <div className="mt-3 flex flex-col gap-3">
-                    {expectedResponses.map((item, idx) => (
-                      <ExpectedResponseItem key={`${item.state}-${idx}`} item={item} active={item.state === state} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div>
                 <SectionHeader
-                  icon="list"
-                  label="Automated actions"
-                  value={`${cards.length} events`}
+                  icon="clipboard"
+                  label="Agent Reasoning"
+                  value={`${agentReasoningItems.length} insights`}
                 />
-                <div className="mt-3 border-l border-slate-200 pl-4 text-sm leading-6 text-slate-600">
-                  {cards.length === 0
-                    ? "Actions will stream here as Zoé executes her runbook."
-                    : cards.slice(-5).map((card) => (
-                        <p key={`${card.kind}-${card.ts}`}>
-                          {describeCardEvent(card)}
-                        </p>
-                      ))}
+                <div className="mt-3 flex flex-col gap-2 rounded-xl bg-slate-950 px-4 py-4 text-xs leading-5 text-slate-300">
+                  {agentReasoningItems.length === 0 ? (
+                    <p className="font-mono text-slate-400">Waiting for agent reasoning...</p>
+                  ) : (
+                    agentReasoningItems.slice(-5).map((item, index) => (
+                      <ReasoningItem key={`${item.title}-${index}`} item={item} />
+                    ))
+                  )}
                 </div>
-              </div>
               </div>
             </div>
           </Panel>
@@ -251,31 +225,67 @@ export default function ConversationPage() {
                   progress={state === "complete" ? 100 : automationProgress}
                 />
               </div>
-
-              <div>
-                <SectionHeader
-                  icon="clipboard"
-                  label="Automation logs"
-                  value={`${cards.length} entries`}
-                />
-                <div className="mt-3 rounded-xl bg-slate-950 px-4 py-4 font-mono text-xs leading-6 text-slate-300">
-                  {cards.length === 0 ? (
-                    <p>waiting for events...</p>
-                  ) : (
-                    cards.slice(-4).map((card) => (
-                      <p key={`${card.kind}-log-${card.ts}`}>
-                        {formatLogLine(card, latestDiagnostic)}
-                      </p>
-                    ))
-                  )}
-                </div>
-              </div>
               </div>
             </div>
           </Panel>
         </section>
       </div>
     </div>
+  );
+}
+
+const FALLBACK_WORKFLOWS = [
+  { id: "local_system_agent", title: "Local System Agent", active: true },
+  { id: "system_slow_diagnostics", title: "System Slow Diagnostics", active: true },
+  { id: "new_employee_onboarding", title: "New Employee Onboarding", active: true },
+  { id: "windows_update_failure", title: "Windows Update Failure", active: true },
+];
+
+function MobileWorkflowLauncher({ onSelect }) {
+  const {
+    data: workflows = [],
+    isError,
+    isLoading,
+  } = useQuery({
+    queryKey: ["workflows"],
+    queryFn: listWorkflows,
+    staleTime: 5 * 60 * 1000,
+  });
+  const visibleWorkflows = workflows.length ? workflows : FALLBACK_WORKFLOWS;
+
+  return (
+    <section className="mb-4 shrink-0 md:hidden">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="font-mono text-xs uppercase tracking-[0.28em] text-slate-600">
+          Workflows
+        </p>
+        {(isLoading || isError || workflows.length === 0) && (
+          <span className="shrink-0 text-xs text-slate-500">
+            {isLoading
+              ? "Loading..."
+              : isError
+                ? "Using defaults"
+                : "Defaults"}
+          </span>
+        )}
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {visibleWorkflows.map((workflowItem) => (
+          <button
+            key={workflowItem.id}
+            type="button"
+            onClick={() => onSelect(workflowItem.id)}
+            className={`shrink-0 rounded-lg border px-3 py-2 text-sm font-medium ${
+              workflowItem.active
+                ? "border-blue-200 bg-blue-50 text-blue-800"
+                : "border-slate-200 bg-white text-slate-500"
+            }`}
+          >
+            {workflowItem.title}
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -329,26 +339,19 @@ function SmallMetric({ kicker, title, detail, progress }) {
   );
 }
 
-function ExpectedResponseItem({ item, active }) {
+function ReasoningItem({ item }) {
   return (
-    <section
-      className={`rounded-lg border px-3 py-3 text-sm ${
-        active
-          ? "border-blue-200 bg-blue-50 text-slate-900"
-          : "border-slate-200 bg-white text-slate-700"
-      }`}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <p className="font-semibold">{item.user}</p>
-        <span className="shrink-0 rounded-md bg-slate-100 px-2 py-1 font-mono text-[10px] uppercase text-slate-600">
-          {item.state}
-        </span>
+    <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+      <div className="flex items-start justify-between gap-3">
+        <p className="font-semibold text-white">{item.title}</p>
+        {item.meta && (
+          <span className="shrink-0 rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] uppercase text-slate-300">
+            {item.meta}
+          </span>
+        )}
       </div>
-      <p className="mt-2 whitespace-pre-wrap leading-5 text-slate-600">{item.assistant}</p>
-      {item.action && (
-        <p className="mt-2 font-mono text-xs text-blue-700">action:{item.action}</p>
-      )}
-    </section>
+      {item.detail && <p className="mt-1 text-slate-300">{item.detail}</p>}
+    </div>
   );
 }
 
@@ -447,89 +450,205 @@ function getAutomationProgress(state, cards) {
   return 0;
 }
 
-function nextActionForState(state, loading) {
-  if (loading) return "Processing";
-  const labels = {
-    idle: "Idle",
-    awaiting_fix_result: "Guide troubleshooting",
-    awaiting_agent_followup: "Agent troubleshooting",
-    awaiting_access_approval: "Request local access",
-    awaiting_settings_action: "Open Windows Update settings",
-    awaiting_tool_result: "Run local action",
-    awaiting_browser_diagnostics: "Collect diagnostics",
-    awaiting_remediation_confirmation: "Confirm remediation",
-    awaiting_remediation_action: "Run local action",
-    awaiting_confirmation: "Awaiting approval",
-    complete: "Complete",
-  };
-  return labels[state] || state || "Idle";
-}
-
 function ticketTitle(card) {
   if (!card) return "-";
   if (card.kind === "ticket_created") return card.data?.ticket_id || "Ticket created";
   return card.data?.title || "Ticket draft ready";
 }
 
-function describeCardEvent(card) {
-  const names = {
-    diagnostic_status: "Started endpoint diagnostic collection.",
-    diagnostic_result: "Normalized diagnostic results and generated summary.",
-    ticket_draft: "Prepared ITSM ticket draft for review.",
-    onboarding_progress: "Updated onboarding automation progress.",
-    ticket_created: `Created ticket ${card.data?.ticket_id || ""}.`,
-  };
-  return names[card.kind] || `Received ${card.kind}.`;
+function getAgentReasoningItems(cards, latestDiagnostic) {
+  const items = [];
+  cards.forEach((card) => {
+    const data = card.data || {};
+    if (card.kind === "diagnostic_status") {
+      items.push({
+        title: "Started endpoint diagnostics",
+        detail: `Collecting ${data.method || "browser and local"} metrics for ${data.device_name || "the endpoint"}.`,
+        meta: data.status || "diagnostic",
+      });
+    }
+    if (card.kind === "diagnostic_result") {
+      const evidenceLabel = diagnosticEvidenceLabel(data);
+      addTextItem(items, "Diagnostic summary", diagnosticSummaryText(data), evidenceLabel);
+      addTraceItems(items, data.tool_trace, "Tool");
+      items.push({
+        title: "Selected diagnostic evidence",
+        detail: `The agent used ${evidenceLabel} to normalize device health and decide the next action.`,
+        meta: "diagnostic",
+      });
+    }
+    if (card.kind === "onboarding_progress") {
+      addTextItem(items, "Onboarding reasoning", data.agent_summary, data.agentic ? "agent" : "fallback");
+      addTraceItems(items, data.tool_trace, "Identity");
+      (data.steps || []).forEach((step) => {
+        items.push({
+          title: step.label || "Onboarding step",
+          detail: step.detail || "The agent updated this onboarding step.",
+          meta: step.status || "step",
+        });
+      });
+    }
+    if (card.kind === "workflow") {
+      addTextItem(items, "Agent rationale", data.rationale, data.decision || data.step || "workflow");
+      addTraceItems(items, data.agent_trace, "Decision");
+      if (data.decision || data.selected_check || data.selected_tool) {
+        items.push({
+          title: workflowDecisionTitle(data),
+          detail: workflowDecisionDetail(data),
+          meta: data.decision || data.step || "workflow",
+        });
+      }
+      if (data.diagnostic_goal) {
+        items.push({
+          title: "Local diagnostic goal",
+          detail: data.diagnostic_goal,
+          meta: data.risk_level || data.status || "plan",
+        });
+      }
+      addListItem(items, "Evidence to collect", data.evidence_to_collect, "evidence");
+      addListItem(items, "Success criteria", data.success_criteria, "criteria");
+      addTextItem(items, "Command preview", data.command_preview, data.status || "local");
+      addTextItem(items, "Local task result", data.summary, data.status);
+      addTextItem(items, "Planner issue", data.agent_error, "error");
+    }
+    if (card.kind === "ticket_draft") {
+      items.push({
+        title: "Prepared ticket draft",
+        detail: `${data.title || "Support ticket"} was drafted from ${latestDiagnostic?.data?.method || "conversation"} evidence with ${data.priority || "medium"} priority.`,
+        meta: data.priority || "draft",
+      });
+    }
+    if (card.kind === "ticket_created") {
+      items.push({
+        title: "Created ITSM ticket",
+        detail: `${data.ticket_id || "Ticket"} is now ${data.status || "open"}.`,
+        meta: "ticket",
+      });
+    }
+  });
+  return compactReasoningItems(items);
 }
 
-function formatLogLine(card, latestDiagnostic) {
-  if (card.kind === "diagnostic_result") {
-    return `diag:${card.data?.diagnostic_id || "latest"} method=${card.data?.method || "unknown"}`;
-  }
-  if (card.kind === "ticket_created") {
-    return `itsm:create status=${card.data?.status || "created"} id=${card.data?.ticket_id || "-"}`;
-  }
-  if (card.kind === "ticket_draft") {
-    return `itsm:draft priority=${card.data?.priority || "P3"} source=${latestDiagnostic?.data?.method || "chat"}`;
-  }
-  return `event:${card.kind} ok`;
+function addTraceItems(items, trace, label) {
+  if (!Array.isArray(trace)) return;
+  trace.forEach((event) => {
+    const name = event.tool || event.decision || event.step || event.action;
+    if (!name) return;
+    const resultEvidence = event.result ? diagnosticEvidenceLabel(event.result) : "";
+    items.push({
+      title: `${label}: ${toTitleCase(name)}`,
+      detail:
+        traceMethodDetail(event, resultEvidence) ||
+        event.rationale ||
+        event.message ||
+        event.summary ||
+        event.status ||
+        traceResultSummary(event.result) ||
+        "The agent recorded this reasoning step.",
+      meta: resultEvidence || event.status || event.source || event.selected_tool || "trace",
+    });
+  });
 }
 
-function getExpectedResponses(workflow) {
-  if (workflow !== "windows_update_failure") return [];
+function addTextItem(items, title, detail, meta) {
+  if (!detail) return;
+  items.push({
+    title,
+    detail: truncateText(String(detail), 180),
+    meta,
+  });
+}
 
-  return [
-    {
-      user: "Windows update is failing",
-      state: "awaiting_agent_followup",
-      assistant:
-        "First, confirm you are connected to VPN if your company requires VPN for Windows updates. Is VPN connected?",
-    },
-    {
-      user: "I am connected to the VPN",
-      state: "awaiting_agent_followup",
-      assistant:
-        "Next, check whether your internet connection is stable, then try Windows Update again. Is the connection stable?",
-    },
-    {
-      user: "yes still failing",
-      state: "awaiting_access_approval",
-      assistant:
-        "Thanks for checking. The next step needs local workstation access. Allow agent to access this device and open Windows Update settings?",
-    },
-    {
-      user: "yes / ok / allow",
-      state: "awaiting_tool_result",
-      assistant: "I'll ask the local app server to collect windows update status now.",
-      action: "collect_windows_update_status",
-    },
-    {
-      user: "local app action complete",
-      state: "awaiting_agent_followup",
-      assistant:
-        "Collected Windows Update service status. Please try Windows Update again. If it is still failing, tell me and I can open Windows Update settings next.",
-    },
-  ];
+function addListItem(items, title, values, meta) {
+  if (!Array.isArray(values) || values.length === 0) return;
+  items.push({
+    title,
+    detail: values.slice(0, 3).join(", "),
+    meta,
+  });
+}
+
+function workflowDecisionTitle(data) {
+  if (data.selected_tool) return `Selected local tool: ${toTitleCase(data.selected_tool)}`;
+  if (data.selected_check) return `Selected check: ${toTitleCase(data.selected_check)}`;
+  if (data.decision) return `Decision: ${toTitleCase(data.decision)}`;
+  return toTitleCase(data.step || "Workflow decision");
+}
+
+function workflowDecisionDetail(data) {
+  if (data.rationale) return truncateText(data.rationale, 180);
+  if (data.message) return truncateText(data.message, 180);
+  if (data.selected_tool) return "The agent chose an allowlisted local action after evaluating the workflow state.";
+  if (data.selected_check) return "The agent chose the next user-facing troubleshooting check.";
+  return data.summary || "The workflow state was updated from the latest agent decision.";
+}
+
+function traceResultSummary(result) {
+  if (!result || typeof result !== "object") return "";
+  if (result.summary) return result.summary;
+  if (result.recommendation) return result.recommendation;
+  if (result.title) return result.title;
+  if (result.method) return `Collected ${result.method} evidence.`;
+  return "";
+}
+
+function diagnosticSummaryText(data) {
+  const metrics = diagnosticMetrics(data);
+  if (metrics.local_app_available) {
+    return (
+      data.summary ||
+      metrics.local_app_summary ||
+      metrics.diagnostic_recommendation ||
+      "Browser diagnostics were enriched with local app telemetry."
+    );
+  }
+  return data.agent_summary || data.summary;
+}
+
+function diagnosticEvidenceLabel(data) {
+  const metrics = diagnosticMetrics(data);
+  if (metrics.local_app_available || metrics.local_app_response) {
+    return "local app telemetry";
+  }
+  if (data.method === "browser_only") return "browser-only evidence";
+  return data.method || "diagnostic evidence";
+}
+
+function diagnosticMetrics(data = {}) {
+  return data.metrics || data.result || data;
+}
+
+function traceMethodDetail(event, resultEvidence) {
+  if (event.tool === "select_diagnostic_method" && event.method === "browser_only") {
+    return "Selected the browser fallback adapter; local app telemetry is applied when the submitted browser payload includes it.";
+  }
+  if (event.method === "browser_only" && resultEvidence === "local app telemetry") {
+    return "Collected browser-submitted diagnostics enriched by the local app server.";
+  }
+  return "";
+}
+
+function compactReasoningItems(items) {
+  const seen = new Set();
+  return items
+    .map((item) => ({
+      ...item,
+      title: truncateText(item.title, 72),
+      detail: truncateText(item.detail, 180),
+      meta: truncateText(item.meta || "", 22),
+    }))
+    .filter((item) => {
+      const key = `${item.title}|${item.detail}|${item.meta}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function truncateText(value, maxLength) {
+  const text = String(value || "").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1).trim()}...`;
 }
 
 function toTitleCase(value) {
@@ -606,7 +725,10 @@ async function executeAndSubmitLocalAction(
       command: actionRequest.command,
       timeoutSeconds: actionRequest.timeout_seconds,
     });
-    await submitLocalActionResult(sessionId, result);
+    await submitLocalActionResult(sessionId, {
+      ...result,
+      task_context: buildTaskContext(actionRequest),
+    });
     const current = await sendAgentMessage(sessionId, "local app action complete");
     addAssistantResponse(current);
     return current;
@@ -621,6 +743,7 @@ async function executeAndSubmitLocalAction(
       service_statuses: {},
       pending_reboot: null,
       errors: [error?.message || "local_app_unreachable"],
+      task_context: buildTaskContext(actionRequest),
     });
     const current = await sendAgentMessage(sessionId, "local app action failed");
     addAssistantResponse(current);
@@ -630,11 +753,53 @@ async function executeAndSubmitLocalAction(
 
 function confirmationMessage(actionRequest) {
   if (!actionRequest) return "";
-  const command = actionRequest.command
-    ? `\n\nCommand:\n${actionRequest.command}`
+  const commandNotice = actionRequest.command
+    ? "\n\nCommand: shown below for review."
     : "";
   const risk = actionRequest.risk_level
     ? `\n\nRisk: ${actionRequest.risk_level}`
     : "";
-  return `${actionRequest.summary || "Run a local system action?"}${risk}${command}`;
+  return `${actionRequest.summary || "Run a local system action?"}${risk}${commandNotice}`;
+}
+
+function buildTaskContext(actionRequest = {}) {
+  return {
+    task_id: actionRequest.task_id,
+    action: actionRequest.action,
+    user_request: actionRequest.user_request,
+    summary: actionRequest.summary,
+    command: actionRequest.command,
+    risk_level: actionRequest.risk_level,
+    timeout_seconds: actionRequest.timeout_seconds,
+    expected_result: actionRequest.expected_result,
+    interpretation_hint: actionRequest.interpretation_hint,
+    diagnostic_goal: actionRequest.diagnostic_goal,
+    evidence_to_collect: actionRequest.evidence_to_collect,
+    success_criteria: actionRequest.success_criteria,
+    limitations: actionRequest.limitations,
+    output_schema_hint: actionRequest.output_schema_hint,
+  };
+}
+
+function formatAssistantError(error, actionLabel) {
+  const status = error?.response?.status;
+  const serverMessage =
+    error?.response?.data?.detail ||
+    error?.response?.data?.message ||
+    error?.message ||
+    "Unknown error";
+
+  if (!error?.response) {
+    return (
+      `Unable to reach the backend while ${actionLabel}. ` +
+      `Backend URL: ${API_BASE_URL}. Reason: ${serverMessage}. ` +
+      `If you are using a LAN address, start the backend with --host 0.0.0.0, ` +
+      `or use ${API_LOCAL_FALLBACK_URL} on this machine.`
+    );
+  }
+
+  return (
+    `The backend returned an error while ${actionLabel}. ` +
+    `Backend URL: ${API_BASE_URL}. Status: ${status}. Reason: ${serverMessage}.`
+  );
 }
