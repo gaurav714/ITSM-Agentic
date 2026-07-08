@@ -1,0 +1,143 @@
+ITSM-Agentic Project Interview Questions and Answers
+====================================================
+
+Project overview and architecture
+---------------------------------
+
+Q1. What is ITSM-Agentic?
+A1. ITSM-Agentic is a modular conversational AI helpdesk platform for IT support workflows such as local system questions, system slow diagnostics, employee onboarding, and Windows Update failure troubleshooting.
+
+Q2. What are the major parts of the project?
+A2. The project has a FastAPI backend, a React/Vite frontend, and a localhost companion app that exposes workstation diagnostics and approved local actions.
+
+Q3. What problem does this project solve?
+A3. It helps users troubleshoot common IT issues through guided chat workflows, collects diagnostic evidence, drafts support tickets, and can run approved local checks through a local app.
+
+Q4. How is the codebase organized?
+A4. The backend lives in `backend/`, the frontend lives in `frontend/`, the local diagnostic companion app lives in `local_app/`, and design or workflow documentation lives in `docs/`.
+
+Q5. What makes the architecture modular?
+A5. Each IT workflow implements a common workflow interface and is registered in a workflow registry, so new workflows can be added without rewriting the router or frontend chat flow.
+
+Q6. Which workflows are active?
+A6. The active workflows are Local System Agent, System Slow Diagnostics, New Employee Onboarding, and Windows Update Failure.
+
+FastAPI backend, routing, session state, and workflow registry
+-------------------------------------------------------------
+
+Q7. What is the backend framework used in this project?
+A7. The backend uses Python with FastAPI for HTTP endpoints, request handling, CORS configuration, and OpenAPI documentation.
+
+Q8. What are the main backend endpoints responsible for?
+A8. The backend exposes endpoints for health checks, workflow listing, chat messages, diagnostics, local-action result ingestion, ticket drafts, ticket creation, and ticket history.
+
+Q9. How does the conversation router work?
+A9. The router receives each user message, checks current session state, preserves sticky workflow turns, classifies new intent when needed, and dispatches the message to the selected workflow.
+
+Q10. What is sticky workflow routing?
+A10. Sticky routing keeps short follow-up messages inside the active workflow when the workflow is waiting for a response, instead of treating each reply as a fresh global intent.
+
+Q11. How is session state stored?
+A11. Session state is currently stored in an in-memory session store keyed by session id, with fields such as workflow, state, messages, diagnostic data, ticket draft, and ticket id.
+
+Q12. Why would production need a different session store?
+A12. In-memory sessions disappear on process restart and do not scale across multiple backend instances, so production would typically use Redis or a database.
+
+Q13. What is the workflow registry pattern in this project?
+A13. The workflow registry maps workflow ids to workflow objects, and each workflow implements `handle(session, message)` so the router can call them consistently.
+
+Q14. What role does Pydantic play?
+A14. Pydantic defines request and response models, validates payloads, and shapes structured data such as agent responses, UI cards, diagnostics, local action results, and ticket drafts.
+
+LangGraph, LangChain, OpenAI, and deterministic fallbacks
+--------------------------------------------------------
+
+Q15. How are LangGraph and LangChain used?
+A15. LangGraph is used to model agentic workflow decision loops, and LangChain helps create ReAct agents and OpenAI-backed tool-calling flows.
+
+Q16. Which OpenAI integration is used?
+A16. The backend uses `langchain-openai` and a shared ChatOpenAI helper that reads `OPENAI_API_KEY` and `OPENAI_MODEL` from backend configuration.
+
+Q17. Are OpenAI keys required for every workflow?
+A17. No. Several paths have deterministic behavior or fallbacks, but broader agentic decisions and some structured extraction paths need an OpenAI model when enabled.
+
+Q18. What is a deterministic fallback?
+A18. A deterministic fallback is rule-based logic that can classify intent, ask known checks, or produce simple answers without relying on an LLM call.
+
+Q19. Why are deterministic fallbacks useful?
+A19. They improve reliability in demos and common flows, reduce dependency on LLM availability, and make important safety gates predictable.
+
+Q20. How does the project keep LLMs from executing commands directly?
+A20. The LLM or backend planner can propose a local action, but execution is gated by allowlists, explicit workflow states, frontend approval, and the local app executor.
+
+React/Vite frontend, React Query, Zustand, Axios, and UI cards
+-------------------------------------------------------------
+
+Q21. What frontend stack is used?
+A21. The frontend uses React 18, Vite, TailwindCSS, React Router, React Query, Zustand, and Axios.
+
+Q22. What is React Query used for?
+A22. React Query manages server-state fetching, caching, loading states, and error states for API calls such as workflows and tickets.
+
+Q23. What is Zustand used for?
+A23. Zustand stores local conversation state such as messages, workflow, session id, cards, and current interaction state.
+
+Q24. Why does the frontend use Axios?
+A24. Axios provides a simple HTTP client for calling backend APIs through a shared configured client.
+
+Q25. What are UI cards in this project?
+A25. UI cards are structured backend response objects with a `kind` and `data`, allowing the frontend to render diagnostics, ticket drafts, ticket-created messages, workflow status, and confirmations.
+
+Q26. How does the frontend start a workflow?
+A26. The frontend can call the start-workflow endpoint with a workflow id, which resets the session workflow context and asks the backend to begin that selected flow.
+
+Local app, JSON-RPC, PowerShell task execution, and browser handoff
+------------------------------------------------------------------
+
+Q27. What is the local app?
+A27. The local app is a localhost companion service that exposes JSON-RPC tools for workstation diagnostics and approved local actions.
+
+Q28. Which local app tools are currently documented?
+A28. The documented tools include `diagnostics.search`, `actions.stop_edge`, `actions.collect_windows_update_status`, `actions.open_windows_update_settings`, and `actions.run_powershell_task`.
+
+Q29. How does the browser handoff work?
+A29. The backend returns metadata requesting a local action, the frontend asks for user approval when needed, calls the local app from the browser, then posts structured results back to the backend.
+
+Q30. How are PowerShell tasks controlled?
+A30. PowerShell tasks are planned by the backend, shown to the user for approval, run by the local app as the current user, bounded by timeouts, and reported back with stdout, stderr, exit code, and task context.
+
+Q31. Does the local app attempt administrator elevation?
+A31. No. The local app runs as the current user and reports `needs_elevation` for operations that require administrator permissions.
+
+ITSM workflows and ticketing
+----------------------------
+
+Q32. How does System Slow Diagnostics work?
+A32. It routes device diagnostics through Intune, SCCM, or browser fallback, can include local app diagnostic results, and then prepares a ticket draft for user confirmation.
+
+Q33. What does the Local System Agent do?
+A33. It answers direct workstation questions and can plan approved current-user PowerShell tasks, then interprets returned structured output for the user.
+
+Q34. How does New Employee Onboarding work?
+A34. It collects employee details, confirms intent, and uses a LangGraph ReAct agent with mock identity tools to simulate onboarding operations.
+
+Q35. How does Windows Update Failure work?
+A35. It asks troubleshooting checks, can request local workstation access, runs allowlisted Windows Update actions, and can draft a support ticket when troubleshooting cannot resolve the issue.
+
+Q36. How is ticket creation handled?
+A36. The backend creates ticket drafts from workflow evidence and only creates a mock ticket after the user confirms the draft.
+
+Q37. Is this project integrated with real ServiceNow or Jira?
+A37. No. Ticketing currently uses a mock adapter that returns mock incident ids; real ServiceNow or Jira integration is listed as a roadmap item.
+
+Security, approvals, CORS, and production-readiness
+--------------------------------------------------
+
+Q38. What are the key security guardrails?
+A38. The LLM does not directly execute commands, local actions require user approval, workflow-specific tools are allowlisted, API keys stay in backend environment variables, and CORS is explicitly configured.
+
+Q39. How is CORS configured?
+A39. Backend settings include allowed origins and an optional origin regex so the frontend can call the API from localhost or configured LAN origins.
+
+Q40. What would you improve before production deployment?
+A40. Replace in-memory sessions with Redis or a database, add real identity and ticketing integrations, harden local app deployment, add authentication and authorization, expand automated tests, and improve observability.

@@ -32,6 +32,7 @@ export default function ConversationPage() {
   } = useConversationStore();
 
   const startedRef = useRef(null);
+  const reasoningEndRef = useRef(null);
   const [pendingLocalAction, setPendingLocalAction] = useState(null);
 
   useEffect(() => {
@@ -103,6 +104,10 @@ export default function ConversationPage() {
   const workflowLabel = workflow ? workflow.replaceAll("_", " ") : "Password Reset";
   const agentReasoningItems = getAgentReasoningItems(cards, latestDiagnostic);
 
+  useEffect(() => {
+    reasoningEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [agentReasoningItems.length, messages.length, cards.length, loading]);
+
   return (
     <div className="h-full overflow-hidden bg-white">
       <ConfirmationModal
@@ -170,21 +175,22 @@ export default function ConversationPage() {
             subtitle="Trace · Evidence · Decisions"
             status={<CodePill label="zoe-core v4.2" />}
           >
-            <div className="min-h-0 flex-1 overflow-y-auto p-5">
-              <div>
+            <div className="flex min-h-0 flex-1 flex-col p-5">
+              <div className="flex min-h-0 flex-1 flex-col">
                 <SectionHeader
                   icon="clipboard"
                   label="Agent Reasoning"
                   value={`${agentReasoningItems.length} insights`}
                 />
-                <div className="mt-3 flex flex-col gap-2 rounded-xl bg-slate-950 px-4 py-4 text-xs leading-5 text-slate-300">
+                <div className="mt-3 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain rounded-xl bg-slate-950 px-4 py-4 text-xs leading-5 text-slate-300">
                   {agentReasoningItems.length === 0 ? (
                     <p className="font-mono text-slate-400">Waiting for agent reasoning...</p>
                   ) : (
-                    agentReasoningItems.slice(-5).map((item, index) => (
+                    agentReasoningItems.map((item, index) => (
                       <ReasoningItem key={`${item.title}-${index}`} item={item} />
                     ))
                   )}
+                  <div ref={reasoningEndRef} />
                 </div>
               </div>
             </div>

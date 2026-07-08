@@ -13,7 +13,8 @@ from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.models.schemas import AgentMessageResponse, UICard
+from app.models.schemas import AgentMessageResponse, TicketDraft, UICard
+from app.services.ticket_service import create_ticket
 from app.workflows.base import BaseWorkflow
 from app.workflows.windows_update_failure.agent import run_windows_update_decision_agent
 
@@ -144,6 +145,21 @@ class WindowsUpdateFailureWorkflow(BaseWorkflow):
             )
             session["windows_update_pending_tool"] = ""
 
+        if session.get("state") == "awaiting_ticket_confirmation":
+            return self._handle_ticket_confirmation(session, user_message or "")
+
+        if _user_requests_ticket(user_message or "") and not _user_reports_resolved(
+            user_message or ""
+        ):
+            session["windows_update_ticket_requested"] = True
+            session["windows_update_ticket_request_message"] = user_message or ""
+
+        if (
+            not local_action_result
+            and _should_offer_ticket(session, user_message or "")
+        ):
+            return self._offer_ticket(session, user_message or "")
+
         graph_state = self._graph.invoke(
             {
                 "session_state": session.get("state", "idle"),
@@ -196,6 +212,8 @@ class WindowsUpdateFailureWorkflow(BaseWorkflow):
 
         response = graph_state["response"]
         session["state"] = response.state
+        if graph_state.get("next_decision") in {"resolved", "deny_or_cancel"}:
+            _clear_pending_ticket_request(session)
         if graph_state.get("next_decision") == "run_tool":
             session["windows_update_pending_tool"] = graph_state.get(
                 "selected_tool", ""
@@ -214,6 +232,10 @@ class WindowsUpdateFailureWorkflow(BaseWorkflow):
         session["windows_update_tool_results"] = []
         session["windows_update_current_check"] = ""
         session["windows_update_pending_tool"] = ""
+        session["windows_update_ticket_requested"] = False
+        session["windows_update_ticket_request_message"] = ""
+        session["ticket_draft"] = None
+        session["ticket_id"] = None
         session.pop("local_action_result", None)
 
     def _agent_interpret_and_decide(
@@ -369,6 +391,70 @@ class WindowsUpdateFailureWorkflow(BaseWorkflow):
             },
         )
 
+    def _offer_ticket(
+        self, session: Dict[str, Any], user_message: str
+    ) -> AgentMessageResponse:
+        draft = _build_windows_update_ticket_draft(
+            session,
+            session.get("windows_update_ticket_request_message") or user_message,
+        )
+        session["ticket_draft"] = draft.model_dump()
+        session["state"] = "awaiting_ticket_confirmation"
+        _clear_pending_ticket_request(session)
+        evidence_text = (
+            "the troubleshooting checks and local actions"
+            if session.get("windows_update_tool_results")
+            else "the troubleshooting checks"
+        )
+        return AgentMessageResponse(
+            message=(
+                f"Windows Update is still failing after {evidence_text}. "
+                "I've prepared a support ticket draft. Reply "
+                "'yes' to create it, or 'no' to cancel."
+            ),
+            workflow=self.workflow_id,
+            state="awaiting_ticket_confirmation",
+            cards=[UICard(kind="ticket_draft", data=session["ticket_draft"])],
+        )
+
+    def _handle_ticket_confirmation(
+        self, session: Dict[str, Any], user_message: str
+    ) -> AgentMessageResponse:
+        if _is_clear_approval(user_message):
+            draft = TicketDraft(**session["ticket_draft"])
+            ticket = create_ticket(draft)
+            session["ticket_id"] = ticket["ticket_id"]
+            session["state"] = "complete"
+            _clear_pending_ticket_request(session)
+            return AgentMessageResponse(
+                message=(
+                    f"Ticket {ticket['ticket_id']} created successfully. "
+                    "An IT engineer will follow up shortly."
+                ),
+                workflow=self.workflow_id,
+                state="complete",
+                cards=[UICard(kind="ticket_created", data=ticket)],
+                requires_input=False,
+            )
+
+        if _is_clear_denial(user_message):
+            session["ticket_draft"] = None
+            session["state"] = "idle"
+            _clear_pending_ticket_request(session)
+            return AgentMessageResponse(
+                message="No ticket created. Let me know if you'd like to try again.",
+                workflow=self.workflow_id,
+                state="idle",
+                requires_input=False,
+            )
+
+        return AgentMessageResponse(
+            message="Please reply 'yes' to create the ticket or 'no' to cancel.",
+            workflow=self.workflow_id,
+            state="awaiting_ticket_confirmation",
+            cards=[UICard(kind="ticket_draft", data=session["ticket_draft"])],
+        )
+
 
 def _decide_next_step(state: WindowsUpdateState) -> Dict[str, Any]:
     checks_discussed = state.get("checks_discussed") or []
@@ -459,6 +545,161 @@ def _decide_next_step(state: WindowsUpdateState) -> Dict[str, Any]:
         "summary": (agent_result or {}).get("summary", ""),
         "agent_error": error,
     }
+
+
+def _should_offer_ticket(session: Dict[str, Any], user_message: str) -> bool:
+    if session.get("state") == "awaiting_tool_result":
+        return False
+    if _user_reports_resolved(user_message):
+        return False
+
+    checks_discussed = session.get("windows_update_checks_discussed") or []
+    if _missing_checks(checks_discussed):
+        return False
+
+    if session.get("windows_update_ticket_requested"):
+        return True
+
+    if not _user_reports_still_failing(user_message):
+        return False
+
+    tool_results = session.get("windows_update_tool_results") or []
+    return _all_tools_attempted(tool_results) or _local_actions_unable_to_proceed(
+        tool_results
+    )
+
+
+def _user_requests_ticket(message: str) -> bool:
+    text = f" {(message or '').lower()} "
+    return bool(
+        re.search(
+            r"\b("
+            r"(create|open|raise|file|log|submit|make)\s+(a\s+)?"
+            r"(support|service|helpdesk|it)?\s*(ticket|incident|case)"
+            r"|(create|open|raise|file|log|submit|make)\s+an\s+"
+            r"(support|service|helpdesk|it)?\s*(ticket|incident|case)"
+            r"|ticket\s+(please|pls|request)"
+            r"|support\s+ticket"
+            r"|log\s+(this\s+)?(with\s+)?(it\s+)?support"
+            r"|escalate(\s+this)?"
+            r")\b",
+            text,
+        )
+    )
+
+
+def _user_reports_still_failing(message: str) -> bool:
+    text = f" {(message or '').lower()} "
+    return bool(
+        re.search(
+            r"\b(still|continues?|again|same|not fixed|not resolved|"
+            r"keeps?|failing|failed|fails|error|issue|problem|not working|"
+            r"doesn't work|doesnt work)\b",
+            text,
+        )
+    ) and not _user_reports_resolved(message)
+
+
+def _user_reports_resolved(message: str) -> bool:
+    text = f" {(message or '').lower()} "
+    return bool(
+        re.search(
+            r"\b(fixed|resolved|working now|works now|success|successful|"
+            r"installed|update completed|all good|no issue|no problem|"
+            r"no longer failing)\b",
+            text,
+        )
+    )
+
+
+def _all_tools_attempted(tool_results: list[dict]) -> bool:
+    attempted = {
+        result.get("action") for result in tool_results if isinstance(result, dict)
+    }
+    return set(_WINDOWS_UPDATE_TOOL_ALLOWLIST).issubset(attempted)
+
+
+def _local_actions_unable_to_proceed(tool_results: list[dict]) -> bool:
+    for result in tool_results:
+        if not isinstance(result, dict):
+            continue
+        errors = result.get("errors") or []
+        if result.get("status") == "failed" or "local_app_unreachable" in errors:
+            return True
+    return False
+
+
+def _build_windows_update_ticket_draft(
+    session: Dict[str, Any], user_message: str
+) -> TicketDraft:
+    device = session.get("device_name") or "LOCAL-ENDPOINT"
+    checks_discussed = session.get("windows_update_checks_discussed") or []
+    tool_results = session.get("windows_update_tool_results") or []
+
+    lines = [
+        f"User reports Windows Update is still failing on device: {device}.",
+        f"Latest user message: {user_message or '(no latest user detail)'}",
+    ]
+
+    if checks_discussed:
+        check_labels = [
+            _CHECKS[check_id]["label"]
+            for check_id in checks_discussed
+            if check_id in _CHECKS
+        ]
+        lines.append("Troubleshooting checks covered: " + "; ".join(check_labels) + ".")
+
+    if tool_results:
+        lines.append("Local Windows Update action results:")
+        for result in tool_results:
+            if not isinstance(result, dict):
+                continue
+            action = result.get("action") or "unknown action"
+            status = result.get("status") or "unknown"
+            message = result.get("message") or "No message returned."
+            lines.append(f"- {action}: {status}. {message}")
+
+            services = result.get("service_statuses") or {}
+            if services:
+                service_bits = []
+                for name, data in services.items():
+                    if isinstance(data, dict):
+                        service_bits.append(
+                            f"{name}={data.get('status', 'unknown')}"
+                        )
+                if service_bits:
+                    lines.append("  Services: " + ", ".join(service_bits) + ".")
+
+            pending_reboot = result.get("pending_reboot")
+            if pending_reboot is not None:
+                lines.append(
+                    "  Pending reboot: " + ("yes." if pending_reboot else "no.")
+                )
+
+            errors = result.get("errors") or []
+            if errors:
+                lines.append(
+                    "  Errors/warnings: "
+                    + "; ".join(str(error) for error in errors)
+                    + "."
+                )
+    else:
+        lines.append("No local Windows Update action results were available.")
+
+    return TicketDraft(
+        session_id=session.get("session_id", ""),
+        title=f"Windows Update failure - {device}",
+        description="\n".join(lines),
+        category="Windows Update",
+        priority="Medium",
+        device_name=device,
+        diagnostic_id=session.get("diagnostic_id"),
+    )
+
+
+def _clear_pending_ticket_request(session: Dict[str, Any]) -> None:
+    session["windows_update_ticket_requested"] = False
+    session["windows_update_ticket_request_message"] = ""
 
 
 def _protocol_decision(state: WindowsUpdateState) -> _AgentDecision | None:
@@ -554,6 +795,18 @@ def _sanitize_decision(
             message="",
             rationale=f"Agent selected non-allowlisted tool: {selected_tool}",
         )
+    if decision.decision == "run_tool" and _all_tools_attempted(
+        state.get("tool_results") or []
+    ):
+        return _AgentDecision(
+            decision="clarify",
+            message=(
+                "We have already tried the available Windows Update local actions. "
+                "If Windows Update is still failing, tell me and I can prepare a "
+                "support ticket."
+            ),
+            rationale="Prevented repeating allowlisted Windows Update actions.",
+        )
     if decision.decision == "ask_check" and (
         selected_check not in _CHECKS or selected_check in checks_discussed
     ):
@@ -640,9 +893,20 @@ def _fallback_decision(state: WindowsUpdateState) -> _AgentDecision:
             rationale="Demo fallback asks basic checks before access.",
         )
     if access_approved:
+        selected_tool = _fallback_tool_for_state(state)
+        if not selected_tool:
+            return _AgentDecision(
+                decision="clarify",
+                message=(
+                    "We have already tried the available Windows Update local "
+                    "actions. If it is still failing, tell me and I can prepare "
+                    "a support ticket."
+                ),
+                rationale="Demo fallback does not repeat completed local actions.",
+            )
         return _AgentDecision(
             decision="run_tool",
-            selected_tool=_fallback_tool_for_state(state),
+            selected_tool=selected_tool,
             message="",
             rationale="Demo fallback runs the next allowlisted tool.",
         )
@@ -694,7 +958,9 @@ def _fallback_tool_for_state(state: WindowsUpdateState) -> str:
     }
     if "collect_windows_update_status" not in used_tools:
         return "collect_windows_update_status"
-    return "open_windows_update_settings"
+    if "open_windows_update_settings" not in used_tools:
+        return "open_windows_update_settings"
+    return ""
 
 
 def _is_clear_approval(message: str) -> bool:

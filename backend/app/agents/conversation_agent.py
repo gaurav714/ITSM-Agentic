@@ -108,6 +108,7 @@ def _is_sticky_workflow_turn(workflow_id: str, state: str | None) -> bool:
         "awaiting_agent_followup",
         "awaiting_access_approval",
         "awaiting_settings_action",
+        "awaiting_ticket_confirmation",
         "awaiting_tool_result",
     }
 
@@ -133,6 +134,9 @@ def _reset_workflow_context(session: Dict[str, Any]) -> None:
         "windows_update_access_approved",
         "windows_update_tool_results",
         "windows_update_current_check",
+        "windows_update_pending_tool",
+        "windows_update_ticket_requested",
+        "windows_update_ticket_request_message",
         "windows_update_llm_called",
         "windows_update_agent_error",
         "local_system_pending_task",
